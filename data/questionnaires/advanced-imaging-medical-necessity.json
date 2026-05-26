@@ -1,0 +1,41 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "advanced-imaging-medical-necessity",
+  "url": "http://payer.bcbsil.example/Questionnaire/advanced-imaging-medical-necessity",
+  "version": "1.0.0",
+  "name": "AdvancedImagingMedicalNecessity",
+  "title": "Advanced Imaging — Medical Necessity Documentation",
+  "status": "active",
+  "subjectType": ["Patient"],
+  "date": "2026-01-01",
+  "publisher": "Carelon (BCBSIL Advanced Imaging UM)",
+  "item": [
+    {
+      "linkId": "1",
+      "text": "Patient has attempted at least 6 weeks of prior conservative therapy",
+      "type": "boolean",
+      "required": true,
+      "extension": [
+        {
+          "url": "http://hl7.org/fhir/uv/sdc/StructureDefinition/sdc-questionnaire-initialExpression",
+          "valueExpression": {
+            "language": "text/cql",
+            "expression": "HasPriorConservativeTherapy"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "2",
+      "text": "Attach history and physical",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "3",
+      "text": "Statement of medical necessity",
+      "type": "text",
+      "required": true
+    }
+  ]
+}

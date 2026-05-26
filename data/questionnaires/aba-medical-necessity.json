@@ -1,0 +1,47 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "aba-medical-necessity",
+  "url": "http://payer.bcbsil.example/Questionnaire/aba-medical-necessity",
+  "version": "1.0.0",
+  "name": "AbaMedicalNecessity",
+  "title": "Applied Behavior Analysis — Medical Necessity Documentation",
+  "status": "active",
+  "subjectType": ["Patient"],
+  "date": "2026-01-01",
+  "publisher": "Lucet (BCBSIL Behavioral Health UM)",
+  "item": [
+    {
+      "linkId": "1",
+      "text": "Pervasive or specific developmental disorder ICD-10 attestation",
+      "type": "boolean",
+      "required": true,
+      "extension": [
+        {
+          "url": "http://hl7.org/fhir/uv/sdc/StructureDefinition/sdc-questionnaire-initialExpression",
+          "valueExpression": {
+            "language": "text/cql",
+            "expression": "HasQualifyingDevelopmentalDiagnosis"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "2",
+      "text": "Attach treatment plan",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "3",
+      "text": "Attach behavioral assessment",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "4",
+      "text": "Prescribing physician attestation",
+      "type": "boolean",
+      "required": true
+    }
+  ]
+}

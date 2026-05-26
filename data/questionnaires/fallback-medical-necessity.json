@@ -1,0 +1,26 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "fallback-medical-necessity",
+  "url": "http://payer.bcbsil.example/Questionnaire/fallback-medical-necessity",
+  "version": "1.0.0",
+  "name": "FallbackMedicalNecessity",
+  "title": "Generic Medical Necessity (Fallback)",
+  "status": "active",
+  "subjectType": ["Patient"],
+  "date": "2026-01-01",
+  "publisher": "BCBSIL UM",
+  "item": [
+    {
+      "linkId": "1",
+      "text": "Attach history and physical",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "2",
+      "text": "Statement of medical necessity",
+      "type": "text",
+      "required": true
+    }
+  ]
+}

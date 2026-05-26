@@ -1,0 +1,47 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "oncology-biologic-medical-necessity",
+  "url": "http://payer.bcbsil.example/Questionnaire/oncology-biologic-medical-necessity",
+  "version": "1.0.0",
+  "name": "OncologyBiologicMedicalNecessity",
+  "title": "Oncology Biologic — Medical Necessity Documentation",
+  "status": "active",
+  "subjectType": ["Patient"],
+  "date": "2026-01-01",
+  "publisher": "BCBSIL UM",
+  "item": [
+    {
+      "linkId": "1",
+      "text": "Primary oncology diagnosis (ICD-10)",
+      "type": "string",
+      "required": true,
+      "extension": [
+        {
+          "url": "http://hl7.org/fhir/uv/sdc/StructureDefinition/sdc-questionnaire-initialExpression",
+          "valueExpression": {
+            "language": "text/cql",
+            "expression": "PrimaryOncologyDiagnosis"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "2",
+      "text": "Attach history and physical",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "3",
+      "text": "Attach chart notes from ordering physician",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "4",
+      "text": "Attach treatment plan",
+      "type": "attachment",
+      "required": true
+    }
+  ]
+}

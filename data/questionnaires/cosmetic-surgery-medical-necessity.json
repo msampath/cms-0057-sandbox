@@ -1,0 +1,47 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "cosmetic-surgery-medical-necessity",
+  "url": "http://payer.bcbsil.example/Questionnaire/cosmetic-surgery-medical-necessity",
+  "version": "1.0.0",
+  "name": "CosmeticSurgeryMedicalNecessity",
+  "title": "Cosmetic Surgery — Medical Necessity Documentation",
+  "status": "active",
+  "subjectType": ["Patient"],
+  "date": "2026-01-01",
+  "publisher": "BCBSIL UM",
+  "item": [
+    {
+      "linkId": "1",
+      "text": "Functional impairment documented",
+      "type": "boolean",
+      "required": true,
+      "extension": [
+        {
+          "url": "http://hl7.org/fhir/uv/sdc/StructureDefinition/sdc-questionnaire-initialExpression",
+          "valueExpression": {
+            "language": "text/cql",
+            "expression": "FunctionalImpairmentPresent"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "2",
+      "text": "Attach pre-operative evaluation",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "3",
+      "text": "Attach history and physical",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "4",
+      "text": "Attach operative report",
+      "type": "attachment",
+      "required": true
+    }
+  ]
+}

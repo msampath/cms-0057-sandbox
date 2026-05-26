@@ -1,0 +1,42 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# simulator runtime state — regenerated on first request
+database.json
+
+# local dev notes not meant to ship publicly
+implementation_notes.md
+
+
+# leftover dev scaffold not for shipping
+scripts-genPreIngested.mjs
+v2_implementation_notes.md

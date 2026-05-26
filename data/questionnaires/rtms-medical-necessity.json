@@ -1,0 +1,47 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "rtms-medical-necessity",
+  "url": "http://payer.bcbsil.example/Questionnaire/rtms-medical-necessity",
+  "version": "1.0.0",
+  "name": "RtmsMedicalNecessity",
+  "title": "rTMS — Medical Necessity Documentation",
+  "status": "active",
+  "subjectType": ["Patient"],
+  "date": "2026-01-01",
+  "publisher": "Lucet (BCBSIL Behavioral Health UM)",
+  "item": [
+    {
+      "linkId": "1",
+      "text": "Patient has documented ≥ 2 distinct prior antidepressant trials",
+      "type": "boolean",
+      "required": true,
+      "extension": [
+        {
+          "url": "http://hl7.org/fhir/uv/sdc/StructureDefinition/sdc-questionnaire-initialExpression",
+          "valueExpression": {
+            "language": "text/cql",
+            "expression": "HasPriorAntidepressantTrials"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "2",
+      "text": "Treatment-resistant depression diagnosis attestation",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "linkId": "3",
+      "text": "Attach treatment plan",
+      "type": "attachment",
+      "required": true
+    },
+    {
+      "linkId": "4",
+      "text": "Prior ECT history",
+      "type": "boolean",
+      "required": false
+    }
+  ]
+}
