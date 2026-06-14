@@ -104,6 +104,93 @@ export async function POST(request) {
     note: 'Bundle preserved unaltered; X12 is a parallel projection for the legacy adjudication engine.'
   });
 
+  // Denial simulation — triggered by _simulateDenial flag from EHR debug toggle.
+  if (bundle._simulateDenial) {
+    const authNumber = `DENY${Date.now().toString().slice(-7)}`;
+    const receiverId = getReceiverId(vendor);
+
+    const x12Denial = [
+      `ISA*00*          *00*          *ZZ*${receiverId.padEnd(15)}*ZZ*PROVIDER001    *${new Date().toISOString().slice(2, 10).replace(/-/g, '')}*1200*^*00501*000000003*0*T*:`,
+      `GS*HI*${receiverId}*PROVIDER001*${new Date().toISOString().slice(0, 10).replace(/-/g, '')}*1200*3*X*005010X217`,
+      `ST*278*0001*005010X217`,
+      `BHT*0007*11*DENY-${Date.now().toString().slice(-8)}*${new Date().toISOString().slice(0, 10).replace(/-/g, '')}*1200*18`,
+      `HL*1**20*1`,
+      `AAA*N*A4*A1*Y`,
+      `HCR*NA`,
+      `REF*9F*${authNumber}`,
+      `SE*8*0001`,
+      `GE*1*3`,
+      `IEA*1*000000003`
+    ].join('~\n') + '~';
+
+    logTransaction('PAS Gateway', 'X12 278 REQUEST', {
+      kind: 'fhir-x12-translation',
+      vendor,
+      bundle,
+      x12,
+      mappings,
+      note: 'Bundle preserved unaltered; X12 is a parallel projection for the legacy adjudication engine.'
+    });
+    logTransaction('Legacy UM Mainframe', 'X12 278 RESPONSE (DENIAL)',
+      `Decision: DENIED. Reason: AAA*N*A4. Not medically necessary.\n\n${x12Denial}`
+    );
+
+    const deniedClaimResponse = {
+      resourceType: 'ClaimResponse',
+      id: `cr-${Date.now()}`,
+      status: 'active',
+      type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
+      use: 'preauthorization',
+      patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+      outcome: 'error',
+      disposition: `Prior Authorization Denied by ${vendor}. Service does not meet clinical criteria for medical necessity.`,
+      preAuthRef: authNumber,
+      insurer: { display: vendor },
+      reviewAction: {
+        actionCode: [{ coding: [{ system: 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes', code: 'deny', display: 'Deny' }] }],
+        reasonCode: [{
+          coding: [{ system: 'https://x12.org/codes/AAA', code: 'A4', display: 'Not medically necessary' }],
+          text: `The requested service (${orderedCode || 'service'}) does not meet ${vendor} clinical criteria for medical necessity. Functional impairment or clinical indication documentation submitted is insufficient under policy MED-0472. Appeal rights apply within 60 days of this determination.`
+        }]
+      },
+      error: [{
+        code: {
+          coding: [{ system: 'https://x12.org/codes/AAA', code: 'A4', display: 'Not medically necessary' }],
+          text: 'Not medically necessary'
+        },
+        expression: ['Claim.item[0]']
+      }]
+    };
+
+    const deniedAction = {
+      type: 'update',
+      description: 'Coverage information updated — PA denied',
+      resource: {
+        resourceType: 'Task',
+        status: 'completed',
+        intent: 'proposal',
+        code: { coding: [{ system: 'http://hl7.org/fhir/us/davinci-crd/CodeSystem/temp', code: 'coverage-information' }] },
+        for: { reference: `Patient/${patient?.id || 'unknown'}` },
+        authoredOn: new Date().toISOString(),
+        extension: [
+          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
+          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'auth-needed' },
+          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: 'http://www.ama-assn.org/go/cpt', code: orderedCode || '' } },
+          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() }
+        ]
+      }
+    };
+
+    logTransaction('PAS Gateway', 'COVERAGE-INFORMATION ACTION (DENIAL)',
+      JSON.stringify(deniedAction.resource, null, 2)
+    );
+    logTransaction('PAS Translator', 'FHIR RESPONSE (DENIAL)',
+      `ClaimResponse: outcome=error, reviewAction.actionCode=deny, X12 AAA A4 — Not medically necessary. Appeal period: 60 days.`
+    );
+
+    return NextResponse.json({ ...deniedClaimResponse, systemActions: [deniedAction], _routedTo: vendor });
+  }
+
   // Blepharoplasty (15820) always pends — functional impairment review required.
   if (orderedCode === '15820') {
     const authNumber = `AUTH${Date.now().toString().slice(-7)}`;

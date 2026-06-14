@@ -308,6 +308,7 @@ export default function EhrDashboard() {
   const [answers, setAnswers] = useState({});
   const [pasResponse, setPasResponse] = useState(null);
   const [pendedId, setPendedId] = useState(null);
+  const [simulateDenial, setSimulateDenial] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showLogic, setShowLogic] = useState(false);
   const [smartContext, setSmartContext] = useState(null);
@@ -327,6 +328,7 @@ export default function EhrDashboard() {
     setShowDtr(false);
     setPasResponse(null);
     setPendedId(null);
+    setSimulateDenial(false);
     setQuestionnaire(null);
     setCqlLibrary(null);
     setAnswers({});
@@ -478,7 +480,8 @@ export default function EhrDashboard() {
         { resource: qr }
       ],
       serviceCategory: order.category,
-      planType
+      planType,
+      _simulateDenial: simulateDenial
     };
 
     const res = await fetch('/api/pas/submit', {
@@ -593,7 +596,7 @@ export default function EhrDashboard() {
           )}
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
+        <label className="flex items-center gap-2 text-sm text-gray-700 mb-2">
           <input
             type="checkbox"
             checked={hardStopFlag}
@@ -603,6 +606,18 @@ export default function EhrDashboard() {
           <span>
             <strong>Debug:</strong> simulate <code className="text-xs bg-gray-100 px-1 rounded">hard-stop</code> trigger
             (contraindicated/non-covered scenario)
+          </span>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
+          <input
+            type="checkbox"
+            checked={simulateDenial}
+            onChange={(e) => setSimulateDenial(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span>
+            <strong>Debug:</strong> simulate <code className="text-xs bg-gray-100 px-1 rounded">denial</code> on PAS submit
+            (structured reason codes, CMS-0057-F §1006)
           </span>
         </label>
 
@@ -791,7 +806,41 @@ export default function EhrDashboard() {
         </div>
       )}
 
-      {pasResponse && !pendedId && (
+      {pasResponse && !pendedId && pasResponse.outcome === 'error' && (
+        <div className="bg-red-50 border-2 border-red-700 text-red-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
+          <div className="font-bold text-lg mb-2">✗ {pasResponse.disposition}</div>
+          {(pasResponse.reviewAction?.reasonCode || []).map((rc, i) => {
+            const coding = rc.coding?.[0];
+            return (
+              <div key={i} className="mb-2">
+                <div className="text-sm font-semibold">
+                  Reason code:{' '}
+                  <code className="bg-white px-1 rounded text-red-800">
+                    {coding?.code}
+                  </code>{' '}
+                  <span className="font-normal">— {coding?.display}</span>
+                </div>
+                {rc.text && (
+                  <div className="text-sm mt-1 text-red-800 italic">&ldquo;{rc.text}&rdquo;</div>
+                )}
+              </div>
+            );
+          })}
+          {(pasResponse.error || []).map((err, i) => {
+            const coding = err.code?.coding?.[0];
+            return coding ? (
+              <div key={i} className="text-xs mt-1 text-red-700">
+                X12 AAA: <code className="bg-white px-1 rounded">{coding.code}</code> — {coding.display}
+              </div>
+            ) : null;
+          })}
+          <div className="text-xs mt-3 text-red-700 bg-red-100 px-2 py-1 rounded font-mono">
+            Structured denial reason required per CMS-0057-F (effective Jan 1, 2026). Appeal rights apply.
+          </div>
+        </div>
+      )}
+
+      {pasResponse && !pendedId && pasResponse.outcome !== 'error' && (
         <div className="bg-green-50 border-2 border-green-600 text-green-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
           <div className="font-bold text-lg">✓ {pasResponse.disposition}</div>
           <div className="text-sm mt-1">
