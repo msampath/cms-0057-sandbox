@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction } from '@/lib/db';
+import { resolveRouting } from '@/lib/routing';
 
 /**
  * CDS Hooks 2.0 `order-sign` service.
@@ -32,6 +33,22 @@ function sourceForRule(rule) {
     };
   }
   return SOURCE_DEFAULT;
+}
+
+// ---- Plan-type filtering --------------------------------------------------
+// Pre-ingested rules use source_label ("Medicare Advantage", "Commercial
+// Med-Surg", etc.) rather than an explicit plan_type field. Map the EHR's
+// plan_type selection to the correct subset. BH and Specialty Pharmacy
+// grids apply across all plan types.
+
+function ruleMatchesPlan(rule, planType) {
+  if (rule.plan_type) return rule.plan_type === planType; // explicit wins
+  const label = (rule.source_label || '').toLowerCase();
+  if (!label) return true; // no provenance → universal
+  const isMa = label.includes('medicare');
+  if (planType === 'MA-PPO') return isMa || (!label.includes('commercial') && !label.includes('medsurg') && !label.includes('med-surg') && !label.includes('med surg'));
+  if (planType === 'COMM-PPO' || planType === 'COMM-HMO') return !isMa;
+  return true;
 }
 
 // ---- Rule resolution ------------------------------------------------------
@@ -85,40 +102,6 @@ function findRule(rules, orderedCode, serviceCategory) {
   }
 
   return { rule: null, pass: 'none' };
-}
-
-// ---- Routing resolution ----------------------------------------------------
-
-function resolveRouting(rule, patient) {
-  if (!rule) return { vendor: 'BCBSIL', covered: 'not-covered' };
-
-  if (rule.managed_by !== 'Carelon-or-BCBSIL-conditional') {
-    return { vendor: rule.managed_by, covered: 'covered' };
-  }
-
-  // Conditional: look for an oncology ICD-10 on the Patient's Condition list.
-  const conditions = (patient && patient.condition) || [];
-  const hasOncology = conditions.some((c) => {
-    const code =
-      c?.code?.coding?.[0]?.code ||
-      c?.code?.text ||
-      (typeof c === 'string' ? c : '');
-    if (!code) return false;
-    const first = code.charAt(0).toUpperCase();
-    if (first !== 'C' && first !== 'D') return false;
-    if (first === 'C') return true; // C00–C99 all neoplasms
-    // D-block: only D00–D49 are neoplasms.
-    const tens = parseInt(code.substring(1, 3), 10);
-    return Number.isFinite(tens) && tens <= 49;
-  });
-
-  return {
-    vendor: hasOncology ? 'Carelon' : 'BCBSIL',
-    covered: 'covered',
-    reason: hasOncology
-      ? 'Patient has active oncology Condition (ICD-10 C00–D49); routed to Carelon.'
-      : 'No oncology Condition present; routed to BCBSIL default UM.'
-  };
 }
 
 // ---- Indicator selection ---------------------------------------------------
@@ -211,6 +194,7 @@ export async function POST(request) {
   // Accept either a CDS-Hooks-shaped payload or the simulator's relaxed shape.
   const orderedCode = body.code || body.serviceCode;
   const serviceCategory = body.serviceCategory || null;
+  const planType = body.planType || null;
   const patient = body.patient || body.patientResource || null;
   const patientId =
     (patient && patient.id) || body.patientId || 'unknown';
@@ -225,7 +209,7 @@ export async function POST(request) {
   );
 
   const db = getDb();
-  const rules = db.rules;
+  const rules = planType ? db.rules.filter((r) => ruleMatchesPlan(r, planType)) : db.rules;
 
   // Gold-card check runs BEFORE rule matching — an exempted provider gets
   // pa_needed='satisfied' even if the code is on the PA list.
@@ -291,14 +275,15 @@ export async function POST(request) {
       source: sourceForRule(rule)
     };
   } else {
-    const dtrUrl = `/dtr/launch?questionnaire=${encodeURIComponent(rule.questionnaire_id)}&code=${encodeURIComponent(orderedCode)}`;
+    const questId = rule.questionnaire_id || 'fallback-medical-necessity';
+    const dtrUrl = `/dtr/launch?questionnaire=${encodeURIComponent(questId)}&code=${encodeURIComponent(orderedCode)}`;
     card = {
       summary: 'Prior authorization required',
       indicator,
       detail:
         `Prior authorization required for **${rule.description}**. ` +
         `Reviewed by **${routing.vendor}**${routing.reason ? ` — ${routing.reason}` : ''}. ` +
-        `Complete the bound Questionnaire (\`${rule.questionnaire_id}\`) before order-sign.`,
+        `Complete the bound Questionnaire (\`${questId}\`) before order-sign.`,
       source: sourceForRule(rule),
       links: [
         {
@@ -306,7 +291,7 @@ export async function POST(request) {
           url: dtrUrl,
           type: 'smart',
           appContext: JSON.stringify({
-            questionnaireId: rule.questionnaire_id,
+            questionnaireId: questId,
             cqlLibraryId: rule.cql_library_id,
             orderedCode,
             managedBy: routing.vendor
@@ -314,35 +299,6 @@ export async function POST(request) {
         }
       ]
     };
-
-    // For indicator-info-style alternative suggestions: if rule is auth-needed
-    // and the grid has a no-PA peer (e.g., 99214), surface it as an
-    // alternative suggestion. Demo-pragmatic: just point at office-visit.
-    const peer = rules.find((r) => r.pa_needed === 'no-auth' && r.match_type === 'code');
-    if (peer) {
-      card.suggestions = [
-        {
-          label: `Order an alternative no-PA service (${peer.service_code} — ${peer.description})`,
-          uuid: `suggest-${peer.service_code}`,
-          actions: [
-            {
-              type: 'update',
-              description: `Swap the order to ${peer.service_code}`,
-              resource: {
-                resourceType: 'ServiceRequest',
-                status: 'draft',
-                intent: 'order',
-                code: {
-                  coding: [
-                    { system: 'http://www.ama-assn.org/go/cpt', code: peer.service_code }
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ];
-    }
   }
 
   // ----- Build coverage-information system action -------------------------

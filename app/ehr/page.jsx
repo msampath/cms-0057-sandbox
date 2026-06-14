@@ -125,6 +125,80 @@ const ORDER_OPTIONS = [
   }
 ];
 
+// ---- Patient scenarios -----------------------------------------------------
+// Each scenario drives: patient demographics, plan type, ordering practitioner,
+// and a suggested default order. Switching scenarios resets the order form.
+const PATIENT_SCENARIOS = [
+  {
+    id: 'jane-doe',
+    name: 'Jane Doe',
+    dob: '1972-04-14',
+    gender: 'female',
+    patientId: 'pat-8849-jane-doe',
+    planType: 'COMM-PPO',
+    coverageId: 'cov-comm-ppo-bcbsil',
+    npi: '1234567890',
+    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
+    defaultOrderIndex: 5,
+    presetCode: '',
+    tag: 'General PA',
+    tagColor: 'bg-blue-100 text-blue-800',
+    borderColor: 'border-blue-400',
+    description: 'Commercial PPO, 52 F. Full CRD → DTR → PAS arc; MRI Brain routed to Carelon.',
+  },
+  {
+    id: 'robert-chen',
+    name: 'Robert Chen',
+    dob: '1955-09-22',
+    gender: 'male',
+    patientId: 'pat-7712-robert-chen',
+    planType: 'MA-PPO',
+    coverageId: 'cov-ma-ppo-bcbsil',
+    npi: '1234567890',
+    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
+    defaultOrderIndex: 5,
+    presetCode: '',
+    tag: 'Medicare Advantage',
+    tagColor: 'bg-teal-100 text-teal-800',
+    borderColor: 'border-teal-400',
+    description: 'MA-PPO, 70 M. Same code (70553), filtered to MA-specific rule set only.',
+  },
+  {
+    id: 'dorothy-hayes',
+    name: 'Dorothy Hayes',
+    dob: '1948-03-07',
+    gender: 'female',
+    patientId: 'pat-3301-dorothy-hayes',
+    planType: 'COMM-PPO',
+    coverageId: 'cov-comm-ppo-bcbsil',
+    npi: 'GOLD-NPI-0001',
+    practitioner: { id: 'pract-888-patel', family: 'Patel', given: ['Raj'] },
+    defaultOrderIndex: null,
+    presetCode: '27447',
+    tag: 'Gold Card',
+    tagColor: 'bg-yellow-100 text-yellow-800',
+    borderColor: 'border-yellow-400',
+    description: 'COMM-PPO, 77 F. Dr. Patel is enrolled in the Orthopedic Gold Card — TKA auto-satisfied.',
+  },
+  {
+    id: 'marcus-johnson',
+    name: 'Marcus Johnson',
+    dob: '2014-11-19',
+    gender: 'male',
+    patientId: 'pat-6614-marcus-johnson',
+    planType: 'COMM-HMO',
+    coverageId: 'cov-comm-hmo-bcbsil',
+    npi: '1234567890',
+    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
+    defaultOrderIndex: 10,
+    presetCode: '',
+    tag: 'Behavioral Health',
+    tagColor: 'bg-purple-100 text-purple-800',
+    borderColor: 'border-purple-400',
+    description: 'COMM-HMO, 11 M. ABA therapy with autism Dx; category-match routing to Lucet.',
+  },
+];
+
 // ---- Indicator visual conventions ------------------------------------------
 // CDS Hooks 2.0 indicator semantics are normative; rendered colors are an
 // implementation convention, not normative. We follow the widely-adopted
@@ -160,48 +234,45 @@ const INDICATOR_STYLES = {
   }
 };
 
-// ---- Helpers ---------------------------------------------------------------
-const DUMMY_PATIENT_ID = 'pat-8849-jane-doe';
-const DUMMY_COVERAGE_ID = 'cov-comm-hmo-bcbsil';
-const DUMMY_PRACTITIONER_ID = 'pract-555-smith';
-
-function buildPatientResource(conditions) {
+// ---- Patient resource builders (scenario-driven) ---------------------------
+function buildPatientResource(scenario, orderConditions) {
+  const parts = scenario.name.split(' ');
   return {
     resourceType: 'Patient',
-    id: DUMMY_PATIENT_ID,
-    name: [{ family: 'Doe', given: ['Jane'] }],
-    gender: 'female',
-    birthDate: '1972-04-14',
-    condition: conditions // simulator convenience — inlined Condition list
+    id: scenario.patientId,
+    name: [{ family: parts[parts.length - 1], given: parts.slice(0, -1) }],
+    gender: scenario.gender,
+    birthDate: scenario.dob,
+    condition: orderConditions || []
   };
 }
 
-function buildCoverageResource() {
+function buildCoverageResource(scenario) {
   return {
     resourceType: 'Coverage',
-    id: DUMMY_COVERAGE_ID,
+    id: scenario.coverageId,
     status: 'active',
-    subscriberId: 'BCBSIL-MEM-887421',
+    subscriberId: `BCBSIL-MEM-${scenario.patientId.replace(/\D/g, '').slice(-6)}`,
     payor: [{ identifier: { value: 'BCBSIL' } }]
   };
 }
 
-function buildPractitionerResource() {
+function buildPractitionerResource(scenario) {
   return {
     resourceType: 'Practitioner',
-    id: DUMMY_PRACTITIONER_ID,
-    name: [{ family: 'Smith', given: ['Ada'] }],
-    identifier: [{ system: 'http://hl7.org/fhir/sid/us-npi', value: '1234567890' }]
+    id: scenario.practitioner.id,
+    name: [{ family: scenario.practitioner.family, given: scenario.practitioner.given }],
+    identifier: [{ system: 'http://hl7.org/fhir/sid/us-npi', value: scenario.npi }]
   };
 }
 
-function buildClaimResource(order) {
+function buildClaimResource(scenario, order) {
   return {
     resourceType: 'Claim',
     id: `claim-${Date.now()}`,
     status: 'active',
     use: 'preauthorization',
-    patient: { reference: `Patient/${DUMMY_PATIENT_ID}` },
+    patient: { reference: `Patient/${scenario.patientId}` },
     item: [
       {
         sequence: 1,
@@ -219,7 +290,13 @@ function buildClaimResource(order) {
 
 // ---- Page ------------------------------------------------------------------
 export default function EhrDashboard() {
-  const [selectedIndex, setSelectedIndex] = useState(1); // default 70553
+  const [scenarioId, setScenarioId] = useState('jane-doe');
+  const scenario = useMemo(
+    () => PATIENT_SCENARIOS.find((s) => s.id === scenarioId),
+    [scenarioId]
+  );
+  const [selectedIndex, setSelectedIndex] = useState(5); // 70553 MRI Brain (jane-doe default)
+  const [planType, setPlanType] = useState('COMM-PPO');
   // Free-text code overrides the preset dropdown when non-empty.
   const [customCode, setCustomCode] = useState('');
   const [hardStopFlag, setHardStopFlag] = useState(false);
@@ -230,9 +307,51 @@ export default function EhrDashboard() {
   const [cqlLibrary, setCqlLibrary] = useState(null);
   const [answers, setAnswers] = useState({});
   const [pasResponse, setPasResponse] = useState(null);
+  const [pendedId, setPendedId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showLogic, setShowLogic] = useState(false);
   const [smartContext, setSmartContext] = useState(null);
+
+  // When the selected scenario changes, update plan type, default order, and
+  // reset all card/response state so the new context starts clean.
+  useEffect(() => {
+    setPlanType(scenario.planType);
+    if (scenario.defaultOrderIndex != null) {
+      setSelectedIndex(scenario.defaultOrderIndex);
+      setCustomCode('');
+    } else {
+      setCustomCode(scenario.presetCode || '');
+    }
+    setCard(null);
+    setSystemAction(null);
+    setShowDtr(false);
+    setPasResponse(null);
+    setPendedId(null);
+    setQuestionnaire(null);
+    setCqlLibrary(null);
+    setAnswers({});
+    setSmartContext(null);
+    setLoading(false);
+  }, [scenarioId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll for pended PA determination every 2 seconds until finalized.
+  useEffect(() => {
+    if (!pendedId) return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/pas/pended/${pendedId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status === 'finalized') {
+          clearInterval(iv);
+          setPasResponse(data.claimResponse);
+          setSystemAction(data.systemAction?.resource || null);
+          setPendedId(null);
+        }
+      } catch { /* ignore transient network errors */ }
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [pendedId]);
 
   // If the user typed a custom code, synthesize an order around it with
   // no conditions (so conditional routing falls back to BCBSIL). Otherwise
@@ -259,13 +378,15 @@ export default function EhrDashboard() {
     setSmartContext(null);
     setLoading(true);
 
-    const patient = buildPatientResource(order.conditions);
-    const coverage = buildCoverageResource();
+    const patient = buildPatientResource(scenario, order.conditions);
+    const coverage = buildCoverageResource(scenario);
     const payload = {
       hook: 'order-sign',
       hookInstance: `inst-${Date.now()}`,
       code: order.code === 'NOCODE' ? null : order.code,
       serviceCategory: order.category,
+      planType,
+      practitionerNpi: scenario.npi,
       patient,
       coverage,
       patientId: patient.id,
@@ -340,10 +461,10 @@ export default function EhrDashboard() {
     e.preventDefault();
     setLoading(true);
 
-    const patient = buildPatientResource(order.conditions);
-    const coverage = buildCoverageResource();
-    const practitioner = buildPractitionerResource();
-    const claim = buildClaimResource(order);
+    const patient = buildPatientResource(scenario, order.conditions);
+    const coverage = buildCoverageResource(scenario);
+    const practitioner = buildPractitionerResource(scenario);
+    const claim = buildClaimResource(scenario, order);
     const qr = buildQuestionnaireResponse(questionnaire, answers, patient);
 
     const bundle = {
@@ -356,9 +477,8 @@ export default function EhrDashboard() {
         { resource: claim },
         { resource: qr }
       ],
-      // simulator convenience: top-level breadcrumbs to make the payload
-      // easy to reason about in the UM live feed
-      serviceCategory: order.category
+      serviceCategory: order.category,
+      planType
     };
 
     const res = await fetch('/api/pas/submit', {
@@ -366,9 +486,13 @@ export default function EhrDashboard() {
       body: JSON.stringify(bundle)
     });
     const data = await res.json();
-    setPasResponse(data);
-    // Replace systemAction with the post-PAS "satisfied" update.
-    setSystemAction(data.systemActions?.[0]?.resource || systemAction);
+    if (data.outcome === 'queued') {
+      setPendedId(data.preAuthRef);
+      setPasResponse(data);
+    } else {
+      setPasResponse(data);
+      setSystemAction(data.systemActions?.[0]?.resource || systemAction);
+    }
     setShowDtr(false);
     setLoading(false);
   };
@@ -383,14 +507,48 @@ export default function EhrDashboard() {
         Provider EHR Workspace
       </h1>
 
+      {/* ---- Patient / Scenario selector -------------------------------- */}
+      <div className="mb-6 max-w-3xl">
+        <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Patient scenarios</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {PATIENT_SCENARIOS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setScenarioId(s.id)}
+              className={`text-left p-3 rounded-lg border-2 transition-all ${
+                scenarioId === s.id
+                  ? `${s.borderColor} bg-white shadow-md`
+                  : 'border-gray-200 bg-gray-50 hover:bg-white hover:border-gray-300'
+              }`}
+            >
+              <div className="font-semibold text-gray-900 text-sm">{s.name}</div>
+              <span className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-1 ${s.tagColor}`}>
+                {s.tag}
+              </span>
+              <div className="text-xs text-gray-500 mt-1 leading-snug">{s.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ---- Order entry ------------------------------------------------ */}
       <div className="bg-white shadow rounded-lg p-6 mb-6 border border-gray-200 max-w-3xl">
         <h2 className="text-xl font-semibold mb-4 text-gray-800">
-          Order Entry: Jane Doe
+          Order Entry: {scenario.name}
         </h2>
         <div className="text-xs text-gray-500 mb-4 bg-gray-100 p-2 rounded inline-block">
-          Dummy Context: Patient ({DUMMY_PATIENT_ID}), Coverage ({DUMMY_COVERAGE_ID})
+          Patient ({scenario.patientId}) · Coverage ({scenario.coverageId}) · NPI {scenario.npi}
         </div>
+        <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Plan type</div>
+        <select
+          className="border border-gray-300 p-2 rounded w-full mb-4 text-gray-800"
+          value={planType}
+          onChange={(e) => setPlanType(e.target.value)}
+        >
+          <option value="COMM-PPO">Commercial PPO</option>
+          <option value="COMM-HMO">Commercial HMO</option>
+          <option value="MA-PPO">Medicare Advantage PPO</option>
+        </select>
         <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">
           Preset orders
         </div>
@@ -616,13 +774,35 @@ export default function EhrDashboard() {
       )}
 
       {/* ---- PAS response ---------------------------------------------- */}
-      {pasResponse && (
+      {pendedId && (
+        <div className="bg-amber-50 border-2 border-amber-500 text-amber-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
+          <div className="flex items-center gap-3 mb-1">
+            <span className="inline-block w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <div className="font-bold text-lg">PA Pended — Clinical Review Required</div>
+          </div>
+          <div className="text-sm mt-1">
+            Auth #: <code className="bg-white px-1 rounded">{pasResponse?.preAuthRef}</code> ·
+            Sent to: <strong>{pasResponse?._routedTo || pasResponse?.insurer?.display}</strong>
+          </div>
+          <div className="text-sm mt-2 text-amber-800">{pasResponse?.disposition}</div>
+          <div className="text-xs mt-2 text-amber-700 bg-amber-100 px-2 py-1 rounded font-mono">
+            rest-hook notification (R4 Subscriptions Backport) will fire to this EHR when the determination is finalized.
+          </div>
+        </div>
+      )}
+
+      {pasResponse && !pendedId && (
         <div className="bg-green-50 border-2 border-green-600 text-green-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
           <div className="font-bold text-lg">✓ {pasResponse.disposition}</div>
           <div className="text-sm mt-1">
             Auth #: <code className="bg-white px-1 rounded">{pasResponse.preAuthRef}</code> ·
             Reviewed by: <strong>{pasResponse._routedTo || pasResponse.insurer?.display}</strong>
           </div>
+          {pasResponse._wasPended && (
+            <div className="text-xs mt-2 text-green-700 bg-green-100 px-2 py-1 rounded font-mono">
+              Received via rest-hook notification — pended request finalized after clinical review.
+            </div>
+          )}
         </div>
       )}
     </div>

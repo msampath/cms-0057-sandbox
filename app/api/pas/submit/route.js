@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getDb, logTransaction } from '@/lib/db';
+import { getDb, logTransaction, addPendingRequest, finalizePendingRequest } from '@/lib/db';
+import { resolveRouting } from '@/lib/routing';
 import {
   generateX12_278,
   generateX12_278_Response,
@@ -27,20 +28,14 @@ function pickEntry(bundle, type) {
   return hit ? hit.resource : null;
 }
 
-function primaryIcd10(patient) {
-  const cond = patient?.condition?.[0];
-  if (!cond) return null;
-  return cond?.code?.coding?.[0]?.code || cond?.code?.text || null;
-}
-
-function resolveVendor(rule, patient) {
-  if (!rule) return 'BCBSIL';
-  if (rule.managed_by !== 'Carelon-or-BCBSIL-conditional') return rule.managed_by;
-  const dx = primaryIcd10(patient);
-  if (!dx) return 'BCBSIL';
-  const first = dx.charAt(0).toUpperCase();
-  const tens = parseInt(dx.substring(1, 3), 10);
-  return first === 'C' || (first === 'D' && tens <= 49) ? 'Carelon' : 'BCBSIL';
+function ruleMatchesPlan(rule, planType) {
+  if (rule.plan_type) return rule.plan_type === planType;
+  const label = (rule.source_label || '').toLowerCase();
+  if (!label) return true;
+  const isMa = label.includes('medicare');
+  if (planType === 'MA-PPO') return isMa || (!label.includes('commercial') && !label.includes('medsurg') && !label.includes('med-surg') && !label.includes('med surg'));
+  if (planType === 'COMM-PPO' || planType === 'COMM-HMO') return !isMa;
+  return true;
 }
 
 function findRule(rules, orderedCode, serviceCategory) {
@@ -76,6 +71,7 @@ export async function POST(request) {
     null;
   const serviceCategory =
     claim?.item?.[0]?.productOrService?.text || bundle.serviceCategory || null;
+  const planType = bundle.planType || null;
 
   logTransaction(
     'PAS Gateway',
@@ -83,8 +79,10 @@ export async function POST(request) {
     `FHIR Bundle (type=${bundle.type || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`
   );
 
-  const rule = findRule(getDb().rules, orderedCode, serviceCategory);
-  const vendor = resolveVendor(rule, patient);
+  const db = getDb();
+  const rules = planType ? db.rules.filter((r) => ruleMatchesPlan(r, planType)) : db.rules;
+  const rule = findRule(rules, orderedCode, serviceCategory);
+  const { vendor } = resolveRouting(rule, patient);
 
   // Generate the X12 278 alongside the Bundle (parallel projection, not a
   // destructive conversion).
@@ -105,6 +103,94 @@ export async function POST(request) {
     mappings,
     note: 'Bundle preserved unaltered; X12 is a parallel projection for the legacy adjudication engine.'
   });
+
+  // Blepharoplasty (15820) always pends — functional impairment review required.
+  if (orderedCode === '15820') {
+    const authNumber = `AUTH${Date.now().toString().slice(-7)}`;
+
+    const pendedClaimResponse = {
+      resourceType: 'ClaimResponse',
+      id: `cr-${Date.now()}`,
+      status: 'active',
+      type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
+      use: 'preauthorization',
+      patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+      outcome: 'queued',
+      disposition: 'Prior authorization request is pending clinical review. Standard decision timeline: 7 calendar days.',
+      preAuthRef: authNumber,
+      insurer: { display: vendor },
+      reviewAction: {
+        actionCode: [{ coding: [{ system: 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes', code: 'pend' }] }],
+        reasonCode: [{ coding: [{ system: 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes', code: 'clinical-review-required' }], text: 'Clinical documentation review required for functional impairment determination' }]
+      }
+    };
+
+    addPendingRequest(authNumber, {
+      authNumber,
+      vendor,
+      patientId: patient?.id,
+      orderedCode,
+    });
+
+    logTransaction('PAS Gateway', 'PA PENDED',
+      `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`
+    );
+
+    // Simulate clinical reviewer finalizing after 8 seconds.
+    setTimeout(() => {
+      const finalAction = {
+        type: 'update',
+        description: 'Coverage information updated — PA determination finalized after clinical review',
+        resource: {
+          resourceType: 'Task',
+          status: 'completed',
+          intent: 'proposal',
+          code: { coding: [{ system: 'http://hl7.org/fhir/us/davinci-crd/CodeSystem/temp', code: 'coverage-information' }] },
+          for: { reference: `Patient/${patient?.id || 'unknown'}` },
+          authoredOn: new Date().toISOString(),
+          extension: [
+            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
+            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'satisfied' },
+            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: 'http://www.ama-assn.org/go/cpt', code: orderedCode || '' } },
+            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() },
+            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#satisfied-pa-id', valueString: authNumber }
+          ]
+        }
+      };
+
+      const finalClaimResponse = {
+        resourceType: 'ClaimResponse',
+        id: `cr-final-${Date.now()}`,
+        status: 'active',
+        type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
+        use: 'preauthorization',
+        patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+        outcome: 'complete',
+        disposition: `Prior Authorization Approved by ${vendor}. Functional impairment criteria met on clinical review.`,
+        preAuthRef: authNumber,
+        insurer: { display: vendor },
+        _routedTo: vendor,
+        _wasPended: true,
+        systemActions: [finalAction]
+      };
+
+      finalizePendingRequest(authNumber, {
+        claimResponse: finalClaimResponse,
+        systemAction: finalAction
+      });
+
+      logTransaction('Clinical Review Team', 'PA APPROVED (pended → finalized)',
+        `Auth # ${authNumber} — functional impairment criteria met. Determination: APPROVED.`
+      );
+      logTransaction('PAS Gateway', 'REST-HOOK NOTIFICATION',
+        `Subscription notification fired to EHR rest-hook endpoint per R4 Subscriptions Backport IG.\n\n${JSON.stringify(finalClaimResponse, null, 2)}`
+      );
+    }, 8000);
+
+    return NextResponse.json({ ...pendedClaimResponse, _routedTo: vendor });
+  }
+
+  // ---- Standard synchronous path (all other codes) -------------------------
 
   // Simulate mainframe latency.
   await new Promise((r) => setTimeout(r, 2500));
@@ -149,7 +235,7 @@ export async function POST(request) {
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'satisfied' },
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: 'http://www.ama-assn.org/go/cpt', code: orderedCode || '' } },
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() },
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#authNumber', valueString: authNumber }
+        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#satisfied-pa-id', valueString: authNumber }
       ]
     }
   };
