@@ -81,3 +81,25 @@ PAS endpoint receives a FHIR Bundle (Patient + Coverage + Practitioner + Claim +
 
 - `data/questionnaires/` — 7 FHIR R4 Questionnaire templates (served by `app/api/questionnaire/[id]/`)
 - `data/cql/` — 6 CQL library stubs for DTR pre-population (served by `app/api/cql/[id]/`)
+
+## Next Steps
+
+The next build chunk is the three remaining CMS-0057-F mandated FHIR APIs. The research plan, open regulatory questions, self-contained demo approach, files to create, and recommended implementation order are all in `provider-patient-p2p-research.md` at the repo root. Read that file before starting any of this work.
+
+Short version of the order: NPI logging fix in the CRD hook → Provider Access API + `/um` tab → Patient Access `/patient` surface → Payer-to-Payer tab in `/um`.
+
+## Writing and Documentation Voice
+
+Any README edits, architecture docs, comments written in the user's voice, or other user-facing prose must follow the voice fingerprint at:
+
+```
+C:\Users\Admin\OneDrive\Desktop\surakshith-voice-fingerprint.md
+```
+
+Read that file before writing anything in the user's name. The short rules that matter most for this repo:
+
+- No contractions, no em-dashes, no semicolons, no exclamation marks
+- Long, multi-clause sentences — do not tighten for impact
+- In technical writing, use `→` for process flows, not comma-separated prose runs
+- No AI-tells: no "honest framing", no dramatic colon setups, no short punchy declaratives for effect
+- Hedge claims; lead from experience; do not make universal pronouncements
