@@ -54,6 +54,7 @@ app/
   api/
     cds-services/order-sign/         CRD engine (CDS Hooks 2.0)
     pas/submit/                      PAS endpoint + X12 generator
+    pas/pended/[id]/                 Polling endpoint for pended PA requests
     pas/x12Generator.js              FHIR Bundle → X12 278 + mappings
     extract/                         Live PDF extraction (spawns pdfplumber)
     rules/                           GET active rules
@@ -82,7 +83,11 @@ scripts/
 
 Load the pre-ingested snapshot from `/um` first, then work through these scenarios on `/ehr`.
 
-**Jane Doe (COMM-PPO)** is the baseline scenario and covers the most ground. `99214` returns an info card because the code does not appear on the PA list. `70553` (MRI Brain) returns a warning indicator and routes to Carelon. `J9035` (Avastin) with the oncology diagnosis preset returns a critical indicator also routed to Carelon; switching to the no-oncology-diagnosis variant keeps the same code and the same rule but re-routes to BCBSIL instead, which is the conditional routing logic in `lib/routing.js` at work. `15820` (Blepharoplasty) returns a critical indicator with functional-impairment documentation requirements. Toggling hard-stop produces a non-overridable indicator and disables the order-sign button.
+**Jane Doe (COMM-PPO)** is the baseline scenario and covers the most ground. `99214` returns an info card because the code does not appear on the PA list. `70553` (MRI Brain) returns a warning indicator and routes to Carelon. `J9035` (Avastin) with the oncology diagnosis preset returns a critical indicator also routed to Carelon; switching to the no-oncology-diagnosis variant keeps the same code and the same rule but re-routes to BCBSIL instead, which is the conditional routing logic in `lib/routing.js` at work. Toggling hard-stop produces a non-overridable indicator and disables the order-sign button.
+
+For the pended PA path, select `15820` (Blepharoplasty), complete the DTR questionnaire, and submit PAS. The EHR shows an amber pending state immediately; after eight seconds the server finalizes, fires a simulated rest-hook notification, and the EHR polls and switches to a green approved state. The `/um` Live Traffic Feed shows the full sequence: PA PENDED → PA APPROVED (pended → finalized) → REST-HOOK NOTIFICATION.
+
+For the denial path, check **simulate denial** in Order Entry before submitting any PA-required order. The ClaimResponse returns `outcome: error` with a Da Vinci PAS `reviewAction.actionCode: deny`, X12 AAA reason code `A4` (not medically necessary), and a full appeal-rights disposition. The `/um` feed shows the X12 278 denial response with `AAA*N*A4` and the FHIR ClaimResponse side by side.
 
 **Robert Chen (MA-PPO)** demonstrates plan-type filtering. The same `70553` order now matches against MA-specific rules only, and the card source references the MA PA grid PDF rather than the commercial one.
 
@@ -96,7 +101,7 @@ After any PA-required order and PAS submission, opening the Live Traffic Feed in
 
 ## Sandbox boundaries
 
-CQL is not executed; DTR pre-population values are hardcoded to match what each library's `define` block would compute against the seed patient. SMART app launch is an in-page transition rather than a real OAuth flow. The X12 278 is illustrative and not TR3 005010X217 conformant; receiver IDs like `BCBSIL00001` and `CARELON0001` are realistic-looking placeholders. Behavioral health rules are overridden to `managed_by: "Lucet"` because the BCBSIL BH grid lists BCBSIL as the contact but Lucet is the actual BH utilization management vendor. Pre-ingested data was extracted with `pdfplumber` from the real BCBSIL 2026 PA grid PDFs, and runtime uploads call the same extractor via `/api/extract`. The transaction log is in-memory only and resets on server restart; `database.json` stores committed rules and schema, and the live feed is ephemeral by design.
+CQL is not executed; DTR pre-population values are hardcoded to match what each library's `define` block would compute against the seed patient. SMART app launch is an in-page transition rather than a real OAuth flow. The X12 278 is illustrative and not TR3 005010X217 conformant; receiver IDs like `BCBSIL00001` and `CARELON0001` are realistic-looking placeholders. Behavioral health rules are overridden to `managed_by: "Lucet"` because the BCBSIL BH grid lists BCBSIL as the contact but Lucet is the actual BH utilization management vendor. Pre-ingested data was extracted with `pdfplumber` from the real BCBSIL 2026 PA grid PDFs, and runtime uploads call the same extractor via `/api/extract`. The transaction log and the pending PA request map are both in-memory only and reset on server restart; `database.json` stores committed rules and schema, and the live feed is ephemeral by design.
 
 ---
 
