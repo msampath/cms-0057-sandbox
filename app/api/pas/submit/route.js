@@ -223,7 +223,11 @@ export async function POST(request) {
       `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`
     );
 
-    // Simulate clinical reviewer finalizing after 8 seconds.
+    // PLACEHOLDER: setTimeout simulates a clinical reviewer's async decision.
+    // In production this would be a durable job queue (SQS, Azure Service Bus,
+    // etc.) so the finalization survives server restarts and scales beyond a
+    // single process. The rest-hook notification would fire from a separate
+    // worker, not from within the HTTP request handler.
     setTimeout(() => {
       const finalAction = {
         type: 'update',
