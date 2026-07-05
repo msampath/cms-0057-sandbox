@@ -63,7 +63,10 @@ const ORDER_OPTIONS = [
     conditions: []
   },
   {
-    label: '15820 — Blepharoplasty, Lower Eyelid (BCBSIL, critical)',
+    // The 2026 grids list 15820 on the Medicare Advantage code list only,
+    // so this order matches a rule when the MA-PPO scenario (Robert Chen)
+    // is selected. PAS pends it for clinical review regardless of plan.
+    label: '15820 — Blepharoplasty, Lower Eyelid (MA plan; pends for review)',
     code: '15820',
     category: null,
     conditions: []

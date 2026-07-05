@@ -43,3 +43,4 @@ implementation_notes.md
 # leftover dev scaffold not for shipping
 scripts-genPreIngested.mjs
 v2_implementation_notes.md
+.gstack/
