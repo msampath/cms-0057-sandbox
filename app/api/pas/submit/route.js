@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction, addPendingRequest, finalizePendingRequest } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
+import { PAS_PROFILES, wrapPasResponseBundle } from '@/lib/fhir';
 import {
   generateX12_278,
   generateX12_278_Response,
@@ -132,6 +133,7 @@ export async function POST(request) {
     const deniedClaimResponse = {
       resourceType: 'ClaimResponse',
       id: `cr-${Date.now()}`,
+      meta: { profile: [PAS_PROFILES.claimResponse] },
       status: 'active',
       type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
       use: 'preauthorization',
@@ -184,7 +186,11 @@ export async function POST(request) {
       { patientId: patient?.id || 'unknown' }
     );
 
-    return NextResponse.json({ ...deniedClaimResponse, systemActions: [deniedAction], _routedTo: vendor });
+    // Response is a PAS response Bundle: the ClaimResponse plus the
+    // coverage-information Task carried as a second entry.
+    return NextResponse.json(
+      wrapPasResponseBundle([deniedClaimResponse, deniedAction.resource])
+    );
   }
 
   // Blepharoplasty (15820) always pends — functional impairment review required.
@@ -194,6 +200,7 @@ export async function POST(request) {
     const pendedClaimResponse = {
       resourceType: 'ClaimResponse',
       id: `cr-${Date.now()}`,
+      meta: { profile: [PAS_PROFILES.claimResponse] },
       status: 'active',
       type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
       use: 'preauthorization',
@@ -249,6 +256,7 @@ export async function POST(request) {
       const finalClaimResponse = {
         resourceType: 'ClaimResponse',
         id: `cr-final-${Date.now()}`,
+        meta: { profile: [PAS_PROFILES.claimResponse] },
         status: 'active',
         type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
         use: 'preauthorization',
@@ -256,28 +264,27 @@ export async function POST(request) {
         outcome: 'complete',
         disposition: `Prior Authorization Approved by ${vendor}. Functional impairment criteria met on clinical review.`,
         preAuthRef: authNumber,
-        insurer: { display: vendor },
-        _routedTo: vendor,
-        _wasPended: true,
-        systemActions: [finalAction]
+        insurer: { display: vendor }
       };
 
-      finalizePendingRequest(authNumber, {
-        claimResponse: finalClaimResponse,
-        systemAction: finalAction
-      });
+      const finalBundle = wrapPasResponseBundle([
+        finalClaimResponse,
+        finalAction.resource
+      ]);
+
+      finalizePendingRequest(authNumber, { responseBundle: finalBundle });
 
       logTransaction('Clinical Review Team', 'PA APPROVED (pended → finalized)',
         `Auth # ${authNumber} — functional impairment criteria met. Determination: APPROVED.`,
         { patientId: patient?.id || 'unknown' }
       );
       logTransaction('PAS Gateway', 'REST-HOOK NOTIFICATION',
-        `Subscription notification fired to EHR rest-hook endpoint per R4 Subscriptions Backport IG.\n\n${JSON.stringify(finalClaimResponse, null, 2)}`,
+        `Subscription notification fired to EHR rest-hook endpoint per R4 Subscriptions Backport IG.\n\n${JSON.stringify(finalBundle, null, 2)}`,
         { patientId: patient?.id || 'unknown' }
       );
     }, 8000);
 
-    return NextResponse.json({ ...pendedClaimResponse, _routedTo: vendor });
+    return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse]));
   }
 
   // ---- Standard synchronous path (all other codes) -------------------------
@@ -301,6 +308,7 @@ export async function POST(request) {
   const claimResponse = {
     resourceType: 'ClaimResponse',
     id: `cr-${Date.now()}`,
+    meta: { profile: [PAS_PROFILES.claimResponse] },
     status: 'active',
     type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
     use: 'preauthorization',
@@ -344,9 +352,7 @@ export async function POST(request) {
     { patientId: patient?.id || 'unknown' }
   );
 
-  return NextResponse.json({
-    ...claimResponse,
-    systemActions: [satisfiedAction],
-    _routedTo: vendor
-  });
+  return NextResponse.json(
+    wrapPasResponseBundle([claimResponse, satisfiedAction.resource])
+  );
 }

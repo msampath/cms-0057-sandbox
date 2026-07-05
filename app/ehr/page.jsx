@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { apiUrl } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
+import { PAS_PROFILES } from '@/lib/fhir';
 
 /**
  * Provider EHR + DTR SMART surface.
@@ -269,6 +270,25 @@ function buildClaimResource(scenario, order) {
   };
 }
 
+// The PAS endpoint returns a profile-conformant response Bundle
+// (ClaimResponse + coverage-information Task as entries). The bare-
+// ClaimResponse fallback keeps the page tolerant of the older shape.
+function extractPasResponse(json) {
+  if (json?.resourceType === 'Bundle') {
+    const pick = (type) =>
+      json.entry?.find((e) => e?.resource?.resourceType === type)?.resource ||
+      null;
+    return { claimResponse: pick('ClaimResponse'), task: pick('Task') };
+  }
+  if (json?.resourceType === 'ClaimResponse') {
+    return {
+      claimResponse: json,
+      task: json.systemActions?.[0]?.resource || null
+    };
+  }
+  return { claimResponse: null, task: null };
+}
+
 // ---- Page ------------------------------------------------------------------
 export default function EhrDashboard() {
   const [scenarioId, setScenarioId] = useState('jane-doe');
@@ -289,6 +309,7 @@ export default function EhrDashboard() {
   const [answers, setAnswers] = useState({});
   const [pasResponse, setPasResponse] = useState(null);
   const [pendedId, setPendedId] = useState(null);
+  const [wasPended, setWasPended] = useState(false);
   const [simulateDenial, setSimulateDenial] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showLogic, setShowLogic] = useState(false);
@@ -309,6 +330,7 @@ export default function EhrDashboard() {
     setShowDtr(false);
     setPasResponse(null);
     setPendedId(null);
+    setWasPended(false);
     setSimulateDenial(false);
     setQuestionnaire(null);
     setCqlLibrary(null);
@@ -327,8 +349,10 @@ export default function EhrDashboard() {
         const data = await res.json();
         if (data.status === 'finalized') {
           clearInterval(iv);
-          setPasResponse(data.claimResponse);
-          setSystemAction(data.systemAction?.resource || null);
+          const { claimResponse, task } = extractPasResponse(data.responseBundle);
+          setPasResponse(claimResponse);
+          setSystemAction(task);
+          setWasPended(true);
           setPendedId(null);
         }
       } catch { /* ignore transient network errors */ }
@@ -452,7 +476,8 @@ export default function EhrDashboard() {
 
     const bundle = {
       resourceType: 'Bundle',
-      type: 'transaction',
+      meta: { profile: [PAS_PROFILES.requestBundle] },
+      type: 'collection',
       entry: [
         { resource: patient },
         { resource: coverage },
@@ -465,17 +490,19 @@ export default function EhrDashboard() {
       _simulateDenial: simulateDenial
     };
 
+    setWasPended(false);
     const res = await fetch(apiUrl('/api/pas/submit'), {
       method: 'POST',
       body: JSON.stringify(bundle)
     });
     const data = await res.json();
-    if (data.outcome === 'queued') {
-      setPendedId(data.preAuthRef);
-      setPasResponse(data);
+    const { claimResponse, task } = extractPasResponse(data);
+    if (claimResponse?.outcome === 'queued') {
+      setPendedId(claimResponse.preAuthRef);
+      setPasResponse(claimResponse);
     } else {
-      setPasResponse(data);
-      setSystemAction(data.systemActions?.[0]?.resource || systemAction);
+      setPasResponse(claimResponse);
+      setSystemAction(task || systemAction);
     }
     setShowDtr(false);
     setLoading(false);
@@ -778,7 +805,7 @@ export default function EhrDashboard() {
           </div>
           <div className="text-sm mt-1">
             Auth #: <code className="bg-white px-1 rounded">{pasResponse?.preAuthRef}</code> ·
-            Sent to: <strong>{pasResponse?._routedTo || pasResponse?.insurer?.display}</strong>
+            Sent to: <strong>{pasResponse?.insurer?.display}</strong>
           </div>
           <div className="text-sm mt-2 text-amber-800">{pasResponse?.disposition}</div>
           <div className="text-xs mt-2 text-amber-700 bg-amber-100 px-2 py-1 rounded font-mono">
@@ -826,9 +853,9 @@ export default function EhrDashboard() {
           <div className="font-bold text-lg">✓ {pasResponse.disposition}</div>
           <div className="text-sm mt-1">
             Auth #: <code className="bg-white px-1 rounded">{pasResponse.preAuthRef}</code> ·
-            Reviewed by: <strong>{pasResponse._routedTo || pasResponse.insurer?.display}</strong>
+            Reviewed by: <strong>{pasResponse.insurer?.display}</strong>
           </div>
-          {pasResponse._wasPended && (
+          {wasPended && (
             <div className="text-xs mt-2 text-green-700 bg-green-100 px-2 py-1 rounded font-mono">
               Received via rest-hook notification — pended request finalized after clinical review.
             </div>
