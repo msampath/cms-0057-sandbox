@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getLog } from '@/lib/db';
 import { getPatient } from '@/lib/patients';
+import { requireScopes, AUTH_ENABLED } from '@/lib/auth';
 
 // SMART on FHIR v2 scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -10,11 +11,14 @@ const REQUIRED_SCOPES = [
 ];
 
 export async function GET(request) {
+  // Demo JWT enforcement (backend-services flavor): 401 without a Bearer
+  // token, 403 on missing scopes. Production would require a signed client
+  // assertion and token introspection rather than a shared demo secret.
+  const denied = requireScopes(request, REQUIRED_SCOPES);
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const npi = searchParams.get('npi');
-
-  // In production: validate SMART backend-services token here.
-  // Demo: NPI is accepted as-is from the query parameter.
 
   const log = getLog();
 
@@ -57,7 +61,9 @@ export async function GET(request) {
   return NextResponse.json({
     npi: npi || null,
     smartScopes: REQUIRED_SCOPES,
-    smartNote: 'Demo: SMART backend-services auth is simulated. Production would require a signed JWT and token introspection.',
+    smartNote: AUTH_ENABLED
+      ? 'Demo JWT enforced: this response was authorized by a client_credentials Bearer token. Production backend services would use a signed client assertion per SMART v2.'
+      : 'Demo auth is disabled (DEMO_AUTH=off).',
     patients,
   });
 }

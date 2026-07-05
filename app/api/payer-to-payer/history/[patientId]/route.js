@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { PRIOR_PLAN_HISTORY } from '@/lib/patients';
 import { buildEob, CARIN_PROFILES } from '@/lib/eob';
 import { PAS_PROFILES } from '@/lib/fhir';
+import { requireScopes } from '@/lib/auth';
+
+const REQUIRED_SCOPES = [
+  'system/Coverage.read',
+  'system/ClaimResponse.read',
+  'system/ExplanationOfBenefit.read'
+];
 
 /**
  * Prior plan history for a matched member, returned as a FHIR searchset
@@ -86,6 +93,9 @@ function priorPaToClaimResponse(pa, patientId, priorPayer) {
 }
 
 export async function GET(request, { params }) {
+  const denied = requireScopes(request, REQUIRED_SCOPES);
+  if (denied) return denied;
+
   const { patientId } = params;
   const history = PRIOR_PLAN_HISTORY[patientId];
 

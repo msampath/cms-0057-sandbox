@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getLog } from '@/lib/db';
 import { getPatient, PAYER_NAME, BENEFIT_YEAR } from '@/lib/patients';
 import { buildEob, CARIN_PROFILES, US_CORE_PROFILES } from '@/lib/eob';
+import { requireScopes, AUTH_ENABLED } from '@/lib/auth';
 
 // SMART on FHIR v2 patient-launch scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -12,6 +13,12 @@ const REQUIRED_SCOPES = [
 ];
 
 export async function GET(request) {
+  // Demo JWT enforcement: 401 without a Bearer token, 403 on missing
+  // scopes. A production endpoint would additionally confirm the token
+  // subject matches the requested patientId.
+  const denied = requireScopes(request, REQUIRED_SCOPES);
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const patientId = searchParams.get('patientId');
 
@@ -23,9 +30,6 @@ export async function GET(request) {
   if (!meta) {
     return NextResponse.json({ error: `Patient ${patientId} not found` }, { status: 404 });
   }
-
-  // In production: validate SMART patient-launch token and confirm the token
-  // subject matches the requested patientId. Demo: accepted as-is.
 
   const log = getLog();
 
@@ -56,7 +60,9 @@ export async function GET(request) {
 
   return NextResponse.json({
     smartScopes: REQUIRED_SCOPES,
-    smartNote: 'Demo: SMART patient-launch auth is simulated. Production would require the patient to authenticate with the payer identity portal.',
+    smartNote: AUTH_ENABLED
+      ? 'Demo JWT enforced: this response was authorized by a Bearer token from /api/auth/token. Production would bind the token to a real patient identity.'
+      : 'Demo auth is disabled (DEMO_AUTH=off).',
     patient: {
       resourceType: 'Patient',
       id: patientId,

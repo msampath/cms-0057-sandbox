@@ -2,6 +2,16 @@
 import { useState } from 'react';
 import { apiUrl } from '@/lib/basePath';
 import { PATIENT_LIST, PAYER_NAME, PRIOR_PLAN_HISTORY } from '@/lib/patients';
+import { authedFetch } from '@/lib/smartClient';
+
+// System scopes the requesting payer presents to the prior payer — the
+// union of what member-match and the history endpoint require.
+const P2P_SCOPES = [
+  'system/Patient.read',
+  'system/Coverage.read',
+  'system/ClaimResponse.read',
+  'system/ExplanationOfBenefit.read'
+];
 
 function buildMemberMatchRequest(patient) {
   return {
@@ -57,7 +67,7 @@ export default function P2PExchangePanel() {
     setMatchRequest(req);
 
     try {
-      const res = await fetch(apiUrl('/api/payer-to-payer/member-match'), {
+      const res = await authedFetch(apiUrl('/api/payer-to-payer/member-match'), P2P_SCOPES, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(req),
@@ -78,7 +88,7 @@ export default function P2PExchangePanel() {
       }
 
       setStep('fetching');
-      const histRes = await fetch(apiUrl(`/api/payer-to-payer/history/${memberIdentifier}`));
+      const histRes = await authedFetch(apiUrl(`/api/payer-to-payer/history/${memberIdentifier}`), P2P_SCOPES);
       const histData = await histRes.json();
       if (!histRes.ok) {
         setStep('error');
@@ -103,8 +113,9 @@ export default function P2PExchangePanel() {
       <div className="bg-indigo-950/50 border border-indigo-700 rounded p-3 text-xs text-indigo-200">
         <span className="font-bold text-indigo-300">45 CFR 156.221(c) — Payer-to-Payer API (effective Jan 1, 2027)</span>
         <span className="text-indigo-400 ml-2">
-          New payer sends <code className="bg-indigo-900 px-1 rounded">POST /Patient/$member-match</code> to prior payer. Prior payer returns a matched member ID.
-          New payer then requests bulk FHIR export of PA history and clinical data (up to 5 years lookback).
+          New payer sends <code className="bg-indigo-900 px-1 rounded">POST /Patient/$member-match</code> to prior payer with a
+          system-scoped Bearer token from <code className="bg-indigo-900 px-1 rounded">/api/auth/token</code>. Prior payer returns a matched member ID.
+          New payer then requests the PA history and clinical data (up to 5 years lookback; bulk FHIR in production).
           Member consent required. Demo: consent captured via enrollment form.
         </span>
       </div>

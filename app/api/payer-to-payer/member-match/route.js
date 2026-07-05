@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import { PRIOR_PLAN_HISTORY, PATIENT_ID_BY_SUBSCRIBER } from '@/lib/patients';
+import { requireScopes } from '@/lib/auth';
+
+// System scopes the new payer's backend service presents when calling the
+// prior payer.
+const REQUIRED_SCOPES = ['system/Patient.read', 'system/Coverage.read'];
 
 // Simulated $member-match endpoint (PDex STU 2.0, §4.2).
 // Accepts a FHIR Parameters body containing MemberPatient + CoverageToMatch.
@@ -9,6 +14,9 @@ import { PRIOR_PLAN_HISTORY, PATIENT_ID_BY_SUBSCRIBER } from '@/lib/patients';
 const ALL_PATIENT_IDS = Object.keys(PRIOR_PLAN_HISTORY);
 
 export async function POST(request) {
+  const denied = requireScopes(request, REQUIRED_SCOPES);
+  if (denied) return denied;
+
   const body = await request.json();
 
   // Extract MemberPatient and CoverageToMatch from the Parameters bundle.

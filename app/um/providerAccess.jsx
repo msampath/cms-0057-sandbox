@@ -2,13 +2,20 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { apiUrl } from '@/lib/basePath';
+import { authedFetch, getDemoToken, decodeJwtPayload } from '@/lib/smartClient';
 
 const NPI_OPTIONS = [
   { npi: '1234567890', label: 'NPI 1234567890 — Ada Smith, MD' },
   { npi: 'GOLD-NPI-0001', label: 'NPI GOLD-NPI-0001 — Raj Patel, MD (Gold Card)' },
 ];
 
-const fetcher = (url) => fetch(url).then((r) => r.json());
+const SYSTEM_SCOPES = [
+  'system/Patient.read',
+  'system/ExplanationOfBenefit.read',
+  'system/ClaimResponse.read'
+];
+
+const fetcher = (url) => authedFetch(url, SYSTEM_SCOPES).then((r) => r.json());
 
 export default function ProviderAccessPanel() {
   const [npi, setNpi] = useState('1234567890');
@@ -22,15 +29,8 @@ export default function ProviderAccessPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* SMART auth notice */}
-      <div className="bg-indigo-950/50 border border-indigo-700 rounded p-3 text-xs text-indigo-200">
-        <span className="font-bold text-indigo-300">SMART on FHIR v2 — backend-services flow (simulated)</span>
-        <span className="text-indigo-400 ml-2">
-          Production: provider system signs a JWT, exchanges it for a token at the payer token endpoint, then queries with{' '}
-          <code className="bg-indigo-900 px-1 rounded">system/Patient.read system/ExplanationOfBenefit.read system/ClaimResponse.read</code>.
-          Demo: NPI is accepted directly.
-        </span>
-      </div>
+      {/* SMART auth notice + 401 demo beat */}
+      <SmartAuthBanner />
 
       {/* NPI lookup */}
       <div className="bg-gray-800 rounded border border-gray-700 p-4">
@@ -120,6 +120,69 @@ export default function ProviderAccessPanel() {
             ))}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function SmartAuthBanner() {
+  const [tokenClaims, setTokenClaims] = useState(null);
+  const [unauthResult, setUnauthResult] = useState(null);
+
+  const showToken = async () => {
+    try {
+      const t = await getDemoToken(SYSTEM_SCOPES);
+      setTokenClaims(decodeJwtPayload(t.access_token));
+    } catch {
+      setTokenClaims(null);
+    }
+  };
+
+  // The 401 demo beat: call the API with no Authorization header and show
+  // the OperationOutcome the server returns.
+  const tryWithoutToken = async () => {
+    const res = await fetch(apiUrl('/api/provider-access?npi=1234567890'));
+    const body = await res.json().catch(() => null);
+    setUnauthResult({
+      status: res.status,
+      diagnostics: body?.issue?.[0]?.diagnostics || JSON.stringify(body)
+    });
+  };
+
+  return (
+    <div className="bg-indigo-950/50 border border-indigo-700 rounded p-3 text-xs text-indigo-200">
+      <span className="font-bold text-indigo-300">SMART on FHIR v2 — backend-services flow (demo token endpoint)</span>
+      <span className="text-indigo-400 ml-2">
+        This panel exchanges client credentials at{' '}
+        <code className="bg-indigo-900 px-1 rounded">/api/auth/token</code> for a five minute JWT
+        and queries with it. Without a Bearer token the API returns 401. Production backend
+        services would present a signed client assertion per SMART v2 rather than a shared demo secret.
+      </span>
+      <div className="mt-2 flex flex-wrap gap-2 items-center">
+        <button
+          type="button"
+          onClick={showToken}
+          className="bg-indigo-800 hover:bg-indigo-700 text-indigo-100 px-2 py-0.5 rounded border border-indigo-600"
+        >
+          Fetch token and show claims
+        </button>
+        <button
+          type="button"
+          onClick={tryWithoutToken}
+          className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded border border-slate-600"
+        >
+          Try the API without a token
+        </button>
+      </div>
+      {tokenClaims && (
+        <div className="mt-2 font-mono text-[11px] text-indigo-100 bg-indigo-900/60 border border-indigo-700 rounded px-2 py-1 break-all">
+          sub={tokenClaims.sub} · exp {new Date(tokenClaims.exp * 1000).toLocaleTimeString()} · scope={tokenClaims.scope}
+        </div>
+      )}
+      {unauthResult && (
+        <div className="mt-2 font-mono text-[11px] text-red-200 bg-red-950/60 border border-red-800 rounded px-2 py-1">
+          HTTP {unauthResult.status} — {unauthResult.diagnostics}
+        </div>
       )}
     </div>
   );

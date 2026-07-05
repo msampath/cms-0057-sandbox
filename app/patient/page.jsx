@@ -1,14 +1,31 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { apiUrl } from '@/lib/basePath';
 import { PATIENT_LIST } from '@/lib/patients';
+import { authedFetch, getDemoToken, decodeJwtPayload } from '@/lib/smartClient';
 
-const fetcher = (url) => fetch(url).then((r) => r.json());
+const PATIENT_SCOPES = [
+  'patient/Patient.read',
+  'patient/Coverage.read',
+  'patient/ExplanationOfBenefit.read',
+  'patient/ClaimResponse.read'
+];
+
+const fetcher = (url) => authedFetch(url, PATIENT_SCOPES).then((r) => r.json());
 
 export default function PatientAccess() {
   const [selectedId, setSelectedId] = useState('pat-8849-jane-doe');
+  const [tokenClaims, setTokenClaims] = useState(null);
+
+  // Obtain the patient-scoped demo token up front so its claims are
+  // visible in the banner; authedFetch reuses the cached token after.
+  useEffect(() => {
+    getDemoToken(PATIENT_SCOPES)
+      .then((t) => setTokenClaims(decodeJwtPayload(t.access_token)))
+      .catch(() => setTokenClaims(null));
+  }, []);
 
   const { data, isLoading } = useSWR(
     apiUrl(`/api/patient-access?patientId=${selectedId}`),
@@ -36,13 +53,24 @@ export default function PatientAccess() {
 
       {/* SMART auth notice */}
       <div className="bg-indigo-950/50 border border-indigo-700 rounded p-3 text-xs text-indigo-200 mb-6">
-        <span className="font-bold text-indigo-300">SMART on FHIR v2 — patient launch (simulated)</span>
+        <span className="font-bold text-indigo-300">SMART on FHIR v2 — patient launch (demo token flow)</span>
         <span className="text-indigo-400 ml-2">
-          Production: patient authenticates with the payer identity portal and authorizes a third-party app
-          (e.g., Apple Health, CommonHealth) with scopes{' '}
-          <code className="bg-indigo-900 px-1 rounded">patient/Patient.read patient/Coverage.read patient/ExplanationOfBenefit.read patient/ClaimResponse.read</code>.
-          Demo: patient selected from the dropdown below.
+          This portal obtains a patient-scoped token from{' '}
+          <code className="bg-indigo-900 px-1 rounded">/api/auth/token</code> and sends it as a
+          Bearer header. The API returns 401 without one. Production adds real patient identity:
+          the member signs in at the payer portal and authorizes a third-party app
+          (e.g., Apple Health, CommonHealth).
         </span>
+        {tokenClaims && (
+          <div className="mt-2 flex flex-wrap gap-2 items-center">
+            <span className="bg-indigo-900/80 border border-indigo-600 rounded px-2 py-0.5 font-mono text-[11px] text-indigo-100">
+              token: sub={tokenClaims.sub} · exp {new Date(tokenClaims.exp * 1000).toLocaleTimeString()}
+            </span>
+            <span className="font-mono text-[11px] text-indigo-300 break-all">
+              scope={tokenClaims.scope}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Patient selector */}
