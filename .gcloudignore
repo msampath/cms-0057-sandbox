@@ -1,0 +1,10 @@
+# Files excluded from `gcloud run deploy --source` uploads. Mirrors
+# .dockerignore; the Docker build happens remotely in Cloud Build.
+.git
+node_modules
+.next
+.claude
+.gstack
+database.json
+start.log
+docs/screenshots
