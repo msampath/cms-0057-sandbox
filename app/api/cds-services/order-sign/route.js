@@ -201,11 +201,13 @@ export async function POST(request) {
   const coverageId =
     (body.coverage && body.coverage.id) || body.coverageId || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
+  const practitionerNpi = body.practitionerNpi || body.npi || null;
 
   logTransaction(
     'CRD Gateway',
     'HOOK RECEIVED',
-    `order-sign for Patient/${patientId}, code=${orderedCode}, category=${serviceCategory || '—'}${hardStopRequested ? ' [hard-stop debug]' : ''}`
+    `order-sign for Patient/${patientId}, code=${orderedCode}, category=${serviceCategory || '—'}${hardStopRequested ? ' [hard-stop debug]' : ''}`,
+    { npi: practitionerNpi, patientId, code: orderedCode }
   );
 
   const db = getDb();
@@ -213,7 +215,6 @@ export async function POST(request) {
 
   // Gold-card check runs BEFORE rule matching — an exempted provider gets
   // pa_needed='satisfied' even if the code is on the PA list.
-  const practitionerNpi = body.practitionerNpi || body.npi || null;
   const goldCard = findGoldCardExemption(db.gold_card_programs, orderedCode, practitionerNpi);
 
   const { rule, pass } = findRule(rules, orderedCode, serviceCategory);
@@ -319,13 +320,15 @@ export async function POST(request) {
   logTransaction(
     'CRD Gateway',
     'COVERAGE-INFORMATION ACTION',
-    JSON.stringify(systemAction.resource, null, 2)
+    JSON.stringify(systemAction.resource, null, 2),
+    { npi: practitionerNpi, patientId, code: orderedCode }
   );
 
   logTransaction(
     'CRD Engine',
     'EVALUATION',
-    `pass=${pass} code=${orderedCode} rule=${rule ? rule.description : '—'} indicator=${card.indicator} routed=${routing.vendor}`
+    `pass=${pass} code=${orderedCode} rule=${rule ? rule.description : '—'} indicator=${card.indicator} routed=${routing.vendor}`,
+    { npi: practitionerNpi, patientId, code: orderedCode }
   );
 
   return NextResponse.json({

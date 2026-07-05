@@ -1,6 +1,10 @@
 # Research Plan — Provider Access, Patient Access, Payer-to-Payer APIs
 
-Three of the four CMS-0057-F mandated FHIR APIs are not yet represented in this demo. This document is a research plan and scoping note before building them. The goal is self-contained implementations that use the existing demo data (patient scenarios, transaction log, rule index) as the backing store — no new external dependencies.
+**Status: implemented.** All three APIs described in this document are now built and shipped. This file is kept as a historical record of the scoping decisions and open regulatory questions that preceded the build. For current architecture, file locations, and next steps, see `CLAUDE.md`.
+
+---
+
+Three of the four CMS-0057-F mandated FHIR APIs were not yet represented in this demo when this document was written. This was a research plan and scoping note before building them. The goal was self-contained implementations that use the existing demo data (patient scenarios, transaction log, rule index) as the backing store — no new external dependencies.
 
 ---
 
@@ -128,3 +132,14 @@ The spec references: Da Vinci PDex IG (the `$member-match` operation + bulk FHIR
 4. Payer-to-Payer tab (most mock-heavy, needs prior plan seed data)
 
 The three together complete the CMS-0057-F four-API picture. The Prior Authorization API (CRD→DTR→PAS) is already represented.
+
+---
+
+## Implementation notes (post-build)
+
+All four items in the implementation order above were completed in a single session. A few choices made during the build that differed from what this plan described:
+
+- `PRIOR_PLAN_HISTORY` ended up in `lib/db.js` as a named export rather than inside `defaultData`, which kept it accessible from both the member-match and history routes without re-deriving it.
+- The `$member-match` response includes a non-standard `_matchedPatientId` field as a demo convenience so the P2P Exchange UI can construct the history URL directly, rather than parsing the `MemberIdentifier.valueIdentifier.value` from the spec-compliant Parameters response.
+- NPI logging was extended beyond `HOOK RECEIVED` and `EVALUATION` to include `COVERAGE-INFORMATION ACTION`, so that all CRD-generated log entries carry `npi` and `patientId` and are visible to both the Provider Access and Patient Access APIs.
+- A code review pass after QA fixed eight additional issues, including the missing `histRes.ok` guard in the P2P Exchange UI and duplicate log entries in the denial simulation path.

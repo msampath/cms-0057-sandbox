@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npm run build)",
+      "Bash(npm run lint)",
+      "Bash(npm run start)",
+      "Bash(node scripts/*)",
+      "Bash(python scripts/*)",
+      "Bash(python -m pip show *)",
+      "PowerShell(*)"
+    ]
+  }
+}

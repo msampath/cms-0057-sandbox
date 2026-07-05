@@ -12,6 +12,8 @@ import {
 import { TranslatorToggle } from './translatorDrawer';
 import RulesExplorer from './rulesExplorer';
 import SchemaExplorer from './schemaExplorer';
+import ProviderAccessPanel from './providerAccess';
+import P2PExchangePanel from './p2pExchange';
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -24,7 +26,7 @@ export default function UmDashboard() {
   const [files, setFiles] = useState([]);
   const [staging, setStaging] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [tab, setTab] = useState('rules'); // 'rules' | 'feed'
+  const [tab, setTab] = useState('rules'); // 'rules' | 'feed' | 'provider' | 'p2p'
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -141,6 +143,18 @@ export default function UmDashboard() {
           >
             Live Traffic Feed {data?.logs && <span className="text-gray-500 text-xs">({data.logs.length})</span>}
           </button>
+          <button
+            onClick={() => setTab('provider')}
+            className={`px-3 py-1.5 rounded text-sm ${tab === 'provider' ? 'bg-blue-700 text-white font-semibold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+          >
+            Provider Access
+          </button>
+          <button
+            onClick={() => setTab('p2p')}
+            className={`px-3 py-1.5 rounded text-sm ${tab === 'p2p' ? 'bg-blue-700 text-white font-semibold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+          >
+            P2P Exchange
+          </button>
         </div>
         <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded">SYSTEM: ONLINE</span>
       </div>
@@ -207,6 +221,35 @@ export default function UmDashboard() {
         )}
       </div>
       </>)}
+
+      {tab === 'provider' && (
+        <div className="flex-grow overflow-auto">
+          <div className="flex justify-between items-center mb-4 shrink-0">
+            <div>
+              <h2 className="text-lg font-bold text-gray-400">Provider Access API</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                45 CFR 156.221(b) — Da Vinci PDex IG · SMART on FHIR v2 (backend-services) · Effective Jan 1, 2027
+              </p>
+            </div>
+            <a href="/patient" className="text-xs text-blue-400 hover:text-blue-300 underline">
+              Patient Access portal →
+            </a>
+          </div>
+          <ProviderAccessPanel />
+        </div>
+      )}
+
+      {tab === 'p2p' && (
+        <div className="flex-grow overflow-auto">
+          <div className="mb-4 shrink-0">
+            <h2 className="text-lg font-bold text-gray-400">Payer-to-Payer Exchange</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              45 CFR 156.221(c) — Da Vinci PDex IG ($member-match + bulk FHIR export) · Effective Jan 1, 2027
+            </p>
+          </div>
+          <P2PExchangePanel />
+        </div>
+      )}
 
       {tab === 'feed' && (
         <div className="flex-grow flex flex-col min-h-0">

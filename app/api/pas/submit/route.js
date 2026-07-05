@@ -76,7 +76,8 @@ export async function POST(request) {
   logTransaction(
     'PAS Gateway',
     'BUNDLE RECEIVED',
-    `FHIR Bundle (type=${bundle.type || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`
+    `FHIR Bundle (type=${bundle.type || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
+    { patientId: patient?.id || 'unknown' }
   );
 
   const db = getDb();
@@ -123,16 +124,9 @@ export async function POST(request) {
       `IEA*1*000000003`
     ].join('~\n') + '~';
 
-    logTransaction('PAS Gateway', 'X12 278 REQUEST', {
-      kind: 'fhir-x12-translation',
-      vendor,
-      bundle,
-      x12,
-      mappings,
-      note: 'Bundle preserved unaltered; X12 is a parallel projection for the legacy adjudication engine.'
-    });
     logTransaction('Legacy UM Mainframe', 'X12 278 RESPONSE (DENIAL)',
-      `Decision: DENIED. Reason: AAA*N*A4. Not medically necessary.\n\n${x12Denial}`
+      `Decision: DENIED. Reason: AAA*N*A4. Not medically necessary.\n\n${x12Denial}`,
+      { patientId: patient?.id || 'unknown' }
     );
 
     const deniedClaimResponse = {
@@ -182,10 +176,12 @@ export async function POST(request) {
     };
 
     logTransaction('PAS Gateway', 'COVERAGE-INFORMATION ACTION (DENIAL)',
-      JSON.stringify(deniedAction.resource, null, 2)
+      JSON.stringify(deniedAction.resource, null, 2),
+      { patientId: patient?.id || 'unknown' }
     );
     logTransaction('PAS Translator', 'FHIR RESPONSE (DENIAL)',
-      `ClaimResponse: outcome=error, reviewAction.actionCode=deny, X12 AAA A4 — Not medically necessary. Appeal period: 60 days.`
+      `ClaimResponse: outcome=error, reviewAction.actionCode=deny, X12 AAA A4 — Not medically necessary. Appeal period: 60 days.`,
+      { patientId: patient?.id || 'unknown' }
     );
 
     return NextResponse.json({ ...deniedClaimResponse, systemActions: [deniedAction], _routedTo: vendor });
@@ -215,12 +211,13 @@ export async function POST(request) {
     addPendingRequest(authNumber, {
       authNumber,
       vendor,
-      patientId: patient?.id,
+      patientId: patient?.id || 'unknown',
       orderedCode,
     });
 
     logTransaction('PAS Gateway', 'PA PENDED',
-      `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`
+      `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
+      { patientId: patient?.id || 'unknown' }
     );
 
     // PLACEHOLDER: setTimeout simulates a clinical reviewer's async decision.
@@ -271,10 +268,12 @@ export async function POST(request) {
       });
 
       logTransaction('Clinical Review Team', 'PA APPROVED (pended → finalized)',
-        `Auth # ${authNumber} — functional impairment criteria met. Determination: APPROVED.`
+        `Auth # ${authNumber} — functional impairment criteria met. Determination: APPROVED.`,
+        { patientId: patient?.id || 'unknown' }
       );
       logTransaction('PAS Gateway', 'REST-HOOK NOTIFICATION',
-        `Subscription notification fired to EHR rest-hook endpoint per R4 Subscriptions Backport IG.\n\n${JSON.stringify(finalClaimResponse, null, 2)}`
+        `Subscription notification fired to EHR rest-hook endpoint per R4 Subscriptions Backport IG.\n\n${JSON.stringify(finalClaimResponse, null, 2)}`,
+        { patientId: patient?.id || 'unknown' }
       );
     }, 8000);
 
@@ -293,7 +292,8 @@ export async function POST(request) {
   logTransaction(
     'Legacy UM Mainframe',
     'X12 278 RESPONSE',
-    `Decision: APPROVED. Auth # ${authNumber}.\n\n${x12Response}`
+    `Decision: APPROVED. Auth # ${authNumber}.\n\n${x12Response}`,
+    { patientId: patient?.id || 'unknown' }
   );
 
   // FHIR ClaimResponse is constructed directly from the preserved Bundle
@@ -334,12 +334,14 @@ export async function POST(request) {
   logTransaction(
     'PAS Gateway',
     'COVERAGE-INFORMATION ACTION',
-    JSON.stringify(satisfiedAction.resource, null, 2)
+    JSON.stringify(satisfiedAction.resource, null, 2),
+    { patientId: patient?.id || 'unknown' }
   );
   logTransaction(
     'PAS Translator',
     'FHIR RESPONSE',
-    `ClaimResponse synthesised from preserved Bundle + auth # ${authNumber} (no FHIR→X12→FHIR round-trip).`
+    `ClaimResponse synthesised from preserved Bundle + auth # ${authNumber} (no FHIR→X12→FHIR round-trip).`,
+    { patientId: patient?.id || 'unknown' }
   );
 
   return NextResponse.json({

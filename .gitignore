@@ -33,6 +33,9 @@ next-env.d.ts
 # simulator runtime state — regenerated on first request
 database.json
 
+# machine-local Claude Code permissions
+.claude/settings.local.json
+
 # local dev notes not meant to ship publicly
 implementation_notes.md
 
