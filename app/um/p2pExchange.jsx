@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { apiUrl } from '@/lib/basePath';
-import { PATIENT_LIST, PAYER_NAME } from '@/lib/patients';
+import { PATIENT_LIST, PAYER_NAME, PRIOR_PLAN_HISTORY } from '@/lib/patients';
 
 function buildMemberMatchRequest(patient) {
   return {
@@ -65,14 +65,20 @@ export default function P2PExchangePanel() {
       const matchData = await res.json();
       setMatchResponse(matchData);
 
-      if (!res.ok || !matchData._matchedPatientId) {
+      // The matched member identifier comes back inside the Parameters
+      // resource, exactly as a production caller would read it.
+      const memberIdentifier = matchData?.parameter?.find(
+        (p) => p.name === 'MemberIdentifier'
+      )?.valueIdentifier?.value;
+
+      if (!res.ok || !memberIdentifier) {
         setStep('error');
         setError(matchData?.issue?.[0]?.diagnostics || 'Member match failed');
         return;
       }
 
       setStep('fetching');
-      const histRes = await fetch(apiUrl(`/api/payer-to-payer/history/${matchData._matchedPatientId}`));
+      const histRes = await fetch(apiUrl(`/api/payer-to-payer/history/${memberIdentifier}`));
       const histData = await histRes.json();
       if (!histRes.ok) {
         setStep('error');
@@ -86,6 +92,10 @@ export default function P2PExchangePanel() {
       setError(String(e.message || e));
     }
   };
+
+  // Prior payer for display subtitles — client-side seed data, matching what
+  // the prior payer identifies itself as in the Parameters system URI.
+  const priorPayer = PRIOR_PLAN_HISTORY[patientId]?.priorPayer || 'Prior Payer';
 
   return (
     <div className="flex flex-col gap-4">
@@ -132,7 +142,7 @@ export default function P2PExchangePanel() {
       {matchRequest && (
         <ExchangeStep
           title="Step 1 — $member-match request"
-          subtitle={`BCBSIL → ${matchResponse?._priorPayer || 'Prior Payer'}: POST /Patient/$member-match`}
+          subtitle={`BCBSIL → ${priorPayer}: POST /Patient/$member-match`}
           color="purple"
           badge="SENT"
         >
@@ -144,7 +154,7 @@ export default function P2PExchangePanel() {
       {matchResponse && (
         <ExchangeStep
           title="Step 2 — $member-match response"
-          subtitle={`${matchResponse._priorPayer || 'Prior Payer'} → BCBSIL: matched member identifier`}
+          subtitle={`${priorPayer} → BCBSIL: MemberIdentifier returned in the Parameters resource`}
           color={step === 'error' ? 'red' : 'green'}
           badge={step === 'error' ? 'ERROR' : 'MATCHED'}
         >
@@ -156,74 +166,112 @@ export default function P2PExchangePanel() {
         </ExchangeStep>
       )}
 
-      {/* Step 3: clinical history */}
-      {history && (
-        <ExchangeStep
-          title="Step 3 — Prior plan clinical history"
-          subtitle={`${history.priorPlanName} · Disenrolled ${history.disenrollmentDate} · ${history.priorAuthorizations.length} prior PAs`}
-          color="cyan"
-          badge="RECEIVED"
-        >
-          <div className="space-y-3">
-            <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Prior authorizations</div>
-            {history.priorAuthorizations.map((pa) => (
-              <div
-                key={pa.authNumber}
-                className={`rounded border p-3 text-xs ${pa.status === 'approved' ? 'bg-green-950/30 border-green-700' : 'bg-red-950/30 border-red-700'}`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="font-bold text-gray-100">{pa.description}</span>
-                  <span className={`px-2 py-0.5 rounded font-semibold ${pa.status === 'approved' ? 'bg-green-800 text-green-200' : 'bg-red-800 text-red-200'}`}>
-                    {pa.status.toUpperCase()}
-                  </span>
-                </div>
-                <div className="text-gray-400">
-                  Auth # <code className="text-gray-200">{pa.authNumber}</code>
-                  {' · '}CPT/HCPCS <code className="text-gray-200">{pa.serviceCode}</code>
-                  {' · '}Decided {pa.decisionDate}
-                </div>
-                {pa.approvedUnits && (
-                  <div className="text-green-300 mt-1">Approved: {pa.approvedUnits} {pa.unitType || 'unit(s)'} · Expires {pa.expiryDate}</div>
-                )}
-                {pa.denialReason && (
-                  <div className="text-red-300 mt-1">
-                    Denial: {pa.denialReason}
-                    {pa.denialCode && <code className="ml-1 bg-red-900 px-1 rounded">{pa.denialCode}</code>}
-                  </div>
-                )}
-                {pa.appealRights && (
-                  <div className="text-amber-300 mt-1">Appeal rights: {pa.appealRights}</div>
-                )}
-              </div>
-            ))}
-
-            <div className="text-xs uppercase tracking-wide text-gray-400 mt-3 mb-1">EOB summary</div>
-            <table className="text-xs w-full">
-              <thead>
-                <tr className="text-gray-500">
-                  <th className="text-left py-1 pr-3">Date</th>
-                  <th className="text-left py-1 pr-3">Service</th>
-                  <th className="text-right py-1 pr-3">Billed</th>
-                  <th className="text-right py-1">Member OOP</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.eobSummary.map((eob, i) => (
-                  <tr key={i} className="border-t border-gray-700">
-                    <td className="py-1 pr-3 text-gray-400">{eob.date}</td>
-                    <td className="py-1 pr-3 text-gray-200">{eob.description}</td>
-                    <td className="py-1 pr-3 text-right text-gray-200">${eob.amount.toLocaleString()}</td>
-                    <td className="py-1 text-right text-amber-300">${eob.memberOOP.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="text-[11px] text-gray-500 mt-2 italic">{history._demo_note}</div>
-          </div>
-        </ExchangeStep>
-      )}
+      {/* Step 3: clinical history (FHIR searchset Bundle) */}
+      {history && <HistoryStep bundle={history} />}
     </div>
+  );
+}
+
+// Renders the prior-plan history Bundle by walking its entries: one prior
+// Coverage, ClaimResponses for the prior PAs, and CARIN BB EOBs.
+function HistoryStep({ bundle }) {
+  const resources = (bundle.entry || []).map((e) => e.resource).filter(Boolean);
+  const coverage = resources.find((r) => r.resourceType === 'Coverage');
+  const priorPas = resources.filter((r) => r.resourceType === 'ClaimResponse');
+  const eobs = resources.filter((r) => r.resourceType === 'ExplanationOfBenefit');
+
+  const planClass = coverage?.class?.[0];
+  const totalBy = (eob, code) =>
+    (eob.total || []).find((t) => t.category?.coding?.some((c) => c.code === code))
+      ?.amount?.value;
+
+  return (
+    <ExchangeStep
+      title="Step 3 — Prior plan clinical history"
+      subtitle={`${planClass?.name || 'Prior plan'} · Disenrolled ${coverage?.period?.end || '—'} · Bundle(${bundle.type}) with ${bundle.total ?? resources.length} resources`}
+      color="cyan"
+      badge="RECEIVED"
+    >
+      <div className="space-y-3">
+        <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">
+          Prior authorizations (ClaimResponse, use=preauthorization)
+        </div>
+        {priorPas.map((cr) => {
+          const approved = cr.outcome === 'complete';
+          const serviceCoding = cr.addItem?.[0]?.productOrService?.coding?.[0];
+          const denial = cr.error?.[0]?.code;
+          return (
+            <div
+              key={cr.id}
+              className={`rounded border p-3 text-xs ${approved ? 'bg-green-950/30 border-green-700' : 'bg-red-950/30 border-red-700'}`}
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="font-bold text-gray-100">{cr.disposition}</span>
+                <span className={`px-2 py-0.5 rounded font-semibold ${approved ? 'bg-green-800 text-green-200' : 'bg-red-800 text-red-200'}`}>
+                  {approved ? 'APPROVED' : 'DENIED'}
+                </span>
+              </div>
+              <div className="text-gray-400">
+                Auth # <code className="text-gray-200">{cr.preAuthRef}</code>
+                {serviceCoding && (
+                  <>
+                    {' · '}CPT/HCPCS <code className="text-gray-200">{serviceCoding.code}</code>
+                  </>
+                )}
+                {' · '}Decided {cr.created?.slice(0, 10)}
+                {cr.preAuthPeriod?.end && <> {' · '}Valid through {cr.preAuthPeriod.end}</>}
+              </div>
+              {denial && (
+                <div className="text-red-300 mt-1">
+                  Denial: {denial.text}
+                  {denial.coding?.[0]?.code && (
+                    <code className="ml-1 bg-red-900 px-1 rounded">{denial.coding[0].code}</code>
+                  )}
+                </div>
+              )}
+              {(cr.processNote || []).map((n) => (
+                <div key={n.number} className={`mt-1 ${/appeal/i.test(n.text) ? 'text-amber-300' : 'text-green-300'}`}>
+                  {n.text}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+
+        <div className="text-xs uppercase tracking-wide text-gray-400 mt-3 mb-1">
+          Claims (ExplanationOfBenefit, CARIN BB)
+        </div>
+        <table className="text-xs w-full">
+          <thead>
+            <tr className="text-gray-500">
+              <th className="text-left py-1 pr-3">Date</th>
+              <th className="text-left py-1 pr-3">Service</th>
+              <th className="text-right py-1 pr-3">Billed</th>
+              <th className="text-right py-1 pr-3">Plan paid</th>
+              <th className="text-right py-1">Member OOP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {eobs.map((eob) => (
+              <tr key={eob.id} className="border-t border-gray-700">
+                <td className="py-1 pr-3 text-gray-400">{eob.item?.[0]?.servicedDate}</td>
+                <td className="py-1 pr-3 text-gray-200">{eob.item?.[0]?.productOrService?.text}</td>
+                <td className="py-1 pr-3 text-right text-gray-200">${totalBy(eob, 'submitted')?.toLocaleString()}</td>
+                <td className="py-1 pr-3 text-right text-green-300">${totalBy(eob, 'paidtoprovider')?.toLocaleString()}</td>
+                <td className="py-1 text-right text-amber-300">${totalBy(eob, 'memberliability')?.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="text-[11px] text-gray-500 mt-2 italic">
+          Production transport would be bulk FHIR (NDJSON) via $export on the Group
+          returned after $member-match. The raw Bundle below is what this demo
+          endpoint returns.
+        </div>
+        <JsonBlock data={bundle} />
+      </div>
+    </ExchangeStep>
   );
 }
 

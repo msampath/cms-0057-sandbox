@@ -46,7 +46,11 @@ export async function POST(request) {
 
   const history = PRIOR_PLAN_HISTORY[matchedPatientId];
 
-  // Return matched member identifier per PDex $member-match response shape.
+  // Pure Parameters response per the HRex $member-match operation: the
+  // caller reads MemberIdentifier.valueIdentifier.value and uses it for
+  // subsequent history queries. No convenience fields outside the spec
+  // shape. In this demo the prior payer's member identifier is the demo
+  // patient id.
   return NextResponse.json({
     resourceType: 'Parameters',
     parameter: [
@@ -62,11 +66,9 @@ export async function POST(request) {
         valueDateTime: new Date().toISOString(),
       },
       {
-        name: '_demo_note',
+        name: 'DemoNote',
         valueString: 'Consent on file via enrollment form. Production would require a FHIR Consent resource or an out-of-band member authorization.',
       },
     ],
-    _matchedPatientId: matchedPatientId,
-    _priorPayer: history?.priorPayer || null,
   });
 }
