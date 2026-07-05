@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import useSWR from 'swr';
+import { apiUrl } from '@/lib/basePath';
 
 const fetcher = (url) => fetch(url).then((r) => r.json());
 
@@ -17,7 +18,7 @@ const fetcher = (url) => fetch(url).then((r) => r.json());
  *   - Effective date
  */
 export default function RulesExplorer() {
-  const { data, isLoading } = useSWR('/api/rules', fetcher, { refreshInterval: 2000 });
+  const { data, isLoading } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 2000 });
   const rules = data?.rules || [];
 
   const [query, setQuery] = useState('');

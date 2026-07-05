@@ -206,7 +206,7 @@ export async function POST(request) {
   logTransaction(
     'CRD Gateway',
     'HOOK RECEIVED',
-    `order-sign for Patient/${patientId}, code=${orderedCode}, category=${serviceCategory || '—'}${hardStopRequested ? ' [hard-stop debug]' : ''}`,
+    `order-sign for Patient/${patientId}, code=${orderedCode || '—'}, category=${serviceCategory || '—'}${hardStopRequested ? ' [hard-stop debug]' : ''}`,
     { npi: practitionerNpi, patientId, code: orderedCode }
   );
 
@@ -327,7 +327,7 @@ export async function POST(request) {
   logTransaction(
     'CRD Engine',
     'EVALUATION',
-    `pass=${pass} code=${orderedCode} rule=${rule ? rule.description : '—'} indicator=${card.indicator} routed=${routing.vendor}`,
+    `pass=${pass} code=${orderedCode || '—'} rule=${rule ? rule.description : '—'} indicator=${card.indicator} routed=${routing.vendor}`,
     { npi: practitionerNpi, patientId, code: orderedCode }
   );
 

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { apiUrl } from '@/lib/basePath';
 
 const PATIENTS = [
   { id: 'pat-8849-jane-doe',       name: 'Jane Doe',        subscriberId: 'BCBSIL-MEM-849', dob: '1972-04-14' },
@@ -62,7 +63,7 @@ export default function P2PExchangePanel() {
     setMatchRequest(req);
 
     try {
-      const res = await fetch('/api/payer-to-payer/member-match', {
+      const res = await fetch(apiUrl('/api/payer-to-payer/member-match'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(req),
@@ -77,7 +78,7 @@ export default function P2PExchangePanel() {
       }
 
       setStep('fetching');
-      const histRes = await fetch(`/api/payer-to-payer/history/${matchData._matchedPatientId}`);
+      const histRes = await fetch(apiUrl(`/api/payer-to-payer/history/${matchData._matchedPatientId}`));
       const histData = await histRes.json();
       if (!histRes.ok) {
         setStep('error');

@@ -9,6 +9,11 @@ import { getDb } from '@/lib/db';
  * gold_card_programs. Useful for the UM Dashboard's Schema Explorer panel.
  * Rule rows are excluded (they're large — fetched separately via /api/rules).
  */
+
+// Parameter-less GET handlers are statically optimized by `next build`,
+// which would freeze this response at build time. Sections are runtime state.
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   const db = getDb();
   return NextResponse.json({

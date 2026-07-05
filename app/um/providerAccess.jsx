@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
+import { apiUrl } from '@/lib/basePath';
 
 const NPI_OPTIONS = [
   { npi: '1234567890', label: 'NPI 1234567890 — Ada Smith, MD' },
@@ -15,7 +16,7 @@ export default function ProviderAccessPanel() {
   const [expandedPatient, setExpandedPatient] = useState(null);
 
   const { data, isLoading } = useSWR(
-    queried ? `/api/provider-access?npi=${encodeURIComponent(queried)}` : null,
+    queried ? apiUrl(`/api/provider-access?npi=${encodeURIComponent(queried)}`) : null,
     fetcher
   );
 

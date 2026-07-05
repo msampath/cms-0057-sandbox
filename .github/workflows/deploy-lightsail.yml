@@ -1,0 +1,71 @@
+# Builds the Docker image and deploys it to an AWS Lightsail container
+# service. Runs on every push to main once the repository is configured;
+# it is skipped silently until then.
+#
+# One-time setup:
+#   1. Create the Lightsail container service (console or CLI):
+#        aws lightsail create-container-service \
+#          --service-name cms-0057-demo --power micro --scale 1
+#   2. Repository secrets (Settings → Secrets and variables → Actions):
+#        AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — an IAM user limited to
+#        Lightsail permissions
+#   3. Repository variables:
+#        AWS_REGION        — e.g. us-east-1
+#        LIGHTSAIL_SERVICE — e.g. cms-0057-demo
+#
+# The health check probes /cms-0057 because the app is served under a
+# basePath and the domain root intentionally returns 404.
+
+name: Deploy to Lightsail
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-lightsail
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ vars.LIGHTSAIL_SERVICE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Install lightsailctl
+        run: |
+          sudo curl -sSL "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
+            -o /usr/local/bin/lightsailctl
+          sudo chmod +x /usr/local/bin/lightsailctl
+
+      - name: Build image
+        run: docker build -t cms-0057-demo:${{ github.sha }} .
+
+      - name: Push image to Lightsail
+        run: |
+          aws lightsail push-container-image \
+            --service-name "${{ vars.LIGHTSAIL_SERVICE }}" \
+            --label app \
+            --image cms-0057-demo:${{ github.sha }} | tee push.log
+
+      - name: Create deployment
+        run: |
+          IMAGE=$(grep -oE '":[a-zA-Z0-9-]+\.app\.[0-9]+"' push.log | tr -d '"')
+          if [ -z "$IMAGE" ]; then
+            echo "could not parse pushed image reference from push.log" >&2
+            exit 1
+          fi
+          echo "deploying $IMAGE"
+          aws lightsail create-container-service-deployment \
+            --service-name "${{ vars.LIGHTSAIL_SERVICE }}" \
+            --containers "{\"app\":{\"image\":\"$IMAGE\",\"ports\":{\"3000\":\"HTTP\"}}}" \
+            --public-endpoint "{\"containerName\":\"app\",\"containerPort\":3000,\"healthCheck\":{\"path\":\"/cms-0057\",\"successCodes\":\"200\"}}"

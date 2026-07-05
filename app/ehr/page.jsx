@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
+import { apiUrl } from '@/lib/basePath';
 
 /**
  * Provider EHR + DTR SMART surface.
@@ -341,7 +342,7 @@ export default function EhrDashboard() {
     if (!pendedId) return;
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/pas/pended/${pendedId}`);
+        const res = await fetch(apiUrl(`/api/pas/pended/${pendedId}`));
         if (!res.ok) return;
         const data = await res.json();
         if (data.status === 'finalized') {
@@ -396,7 +397,7 @@ export default function EhrDashboard() {
       'hard-stop-trigger': hardStopFlag
     };
 
-    const res = await fetch('/api/cds-services/order-sign', {
+    const res = await fetch(apiUrl('/api/cds-services/order-sign'), {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -425,7 +426,7 @@ export default function EhrDashboard() {
     setLoading(true);
 
     // Fetch the bound Questionnaire.
-    const qRes = await fetch(`/api/questionnaire/${ctx.questionnaireId}`);
+    const qRes = await fetch(apiUrl(`/api/questionnaire/${ctx.questionnaireId}`));
     const qJson = await qRes.json();
     setQuestionnaire(qJson);
 
@@ -444,7 +445,7 @@ export default function EhrDashboard() {
 
     // Fetch the CQL library (if bound).
     if (ctx.cqlLibraryId) {
-      const cRes = await fetch(`/api/cql/${ctx.cqlLibraryId}`);
+      const cRes = await fetch(apiUrl(`/api/cql/${ctx.cqlLibraryId}`));
       if (cRes.ok) {
         const lib = await cRes.json();
         const raw =
@@ -484,7 +485,7 @@ export default function EhrDashboard() {
       _simulateDenial: simulateDenial
     };
 
-    const res = await fetch('/api/pas/submit', {
+    const res = await fetch(apiUrl('/api/pas/submit'), {
       method: 'POST',
       body: JSON.stringify(bundle)
     });

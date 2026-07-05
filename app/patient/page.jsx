@@ -1,6 +1,8 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
+import Link from 'next/link';
+import { apiUrl } from '@/lib/basePath';
 
 const PATIENTS = [
   { id: 'pat-8849-jane-doe',        name: 'Jane Doe',        dob: '1972-04-14', planType: 'COMM-PPO' },
@@ -15,7 +17,7 @@ export default function PatientAccess() {
   const [selectedId, setSelectedId] = useState('pat-8849-jane-doe');
 
   const { data, isLoading } = useSWR(
-    `/api/patient-access?patientId=${selectedId}`,
+    apiUrl(`/api/patient-access?patientId=${selectedId}`),
     fetcher,
     { refreshInterval: 3000 }
   );
@@ -31,9 +33,9 @@ export default function PatientAccess() {
           </p>
         </div>
         <div className="flex gap-2 items-center">
-          <a href="/ehr" className="text-xs text-gray-400 hover:text-gray-200 underline">EHR surface</a>
+          <Link href="/ehr" className="text-xs text-gray-400 hover:text-gray-200 underline">EHR surface</Link>
           <span className="text-gray-600">·</span>
-          <a href="/um" className="text-xs text-gray-400 hover:text-gray-200 underline">Payer UM</a>
+          <Link href="/um" className="text-xs text-gray-400 hover:text-gray-200 underline">Payer UM</Link>
           <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded ml-2">SYSTEM: ONLINE</span>
         </div>
       </div>

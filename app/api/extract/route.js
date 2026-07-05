@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { logTransaction } from '@/lib/db';
+import { runPython } from '@/lib/python';
 
 /**
  * POST /api/extract
@@ -33,63 +33,6 @@ const KIND_MATCHERS = [
 function detectKind(filename) {
   for (const m of KIND_MATCHERS) if (m.re.test(filename)) return m;
   return null;
-}
-
-function runPython(scriptPath, args, timeoutMs = 120000) {
-  // Try several Python entry points in order: python3, python, py (Windows
-  // launcher). Whichever resolves first wins. ENOENT errors mean "binary
-  // not on PATH" — silently fall through to the next candidate.
-  const CANDIDATES = ['python3', 'python', 'py'];
-  return new Promise((resolve, reject) => {
-    let idx = 0;
-    const tryNext = () => {
-      if (idx >= CANDIDATES.length) {
-        return reject(new Error('no Python interpreter found on PATH (tried python3, python, py)'));
-      }
-      const cmd = CANDIDATES[idx++];
-      let stdout = '', stderr = '';
-      let resolved = false;
-      let proc;
-      try {
-        proc = spawn(cmd, [scriptPath, ...args], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          // Force UTF-8 stdio so the spawned Python doesn't crash when its
-          // print() emits non-ASCII characters on Windows (default cp1252).
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
-        });
-      } catch (e) {
-        return tryNext();
-      }
-      const killer = setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch {}
-        if (!resolved) { resolved = true; reject(new Error('extractor timed out')); }
-      }, timeoutMs);
-      proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
-      proc.on('error', (err) => {
-        clearTimeout(killer);
-        if (resolved) return;
-        if (err.code === 'ENOENT') return tryNext();
-        resolved = true; reject(err);
-      });
-      proc.on('close', (code) => {
-        clearTimeout(killer);
-        if (resolved) return;
-        // Detect the Windows App Execution Alias stub: it prints a
-        // "Microsoft Store" redirect message and exits 9009. Treat as
-        // "interpreter missing" and try the next candidate.
-        const isStoreStub =
-          code === 9009 ||
-          /Microsoft Store/i.test(stderr + stdout) ||
-          /Python was not found/i.test(stderr + stdout) ||
-          /App execution aliases/i.test(stderr + stdout);
-        if (isStoreStub) return tryNext();
-        resolved = true;
-        resolve({ code, stdout, stderr, command: cmd });
-      });
-    };
-    tryNext();
-  });
 }
 
 export async function POST(request) {

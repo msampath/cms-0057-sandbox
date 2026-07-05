@@ -1,6 +1,8 @@
 'use client';
 import { useState, useMemo } from 'react';
 import useSWR from 'swr';
+import Link from 'next/link';
+import { apiUrl } from '@/lib/basePath';
 import {
   pickPatternForFile,
   buildStagedRules,
@@ -18,11 +20,18 @@ import P2PExchangePanel from './p2pExchange';
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
 export default function UmDashboard() {
-  const { data } = useSWR('/api/logs', fetcher, { refreshInterval: 1000 });
+  const { data } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 1000 });
   // SWR dedupes by key — both this and <RulesExplorer> share the same
   // cached response, no double fetch.
-  const { data: rulesData } = useSWR('/api/rules', fetcher, { refreshInterval: 2000 });
+  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 2000 });
   const ruleCount = rulesData?.rules?.length ?? 0;
+  // One-shot probe: can this host run the Python extractor? Undefined while
+  // loading is treated as available so the form does not flash disabled.
+  const { data: extractHealth } = useSWR(apiUrl('/api/extract/health'), fetcher, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false
+  });
+  const extractorAvailable = extractHealth?.available !== false;
   const [files, setFiles] = useState([]);
   const [staging, setStaging] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -44,7 +53,7 @@ export default function UmDashboard() {
       try {
         const fd = new FormData();
         fd.append('file', f);
-        const res = await fetch('/api/extract', { method: 'POST', body: fd });
+        const res = await fetch(apiUrl('/api/extract'), { method: 'POST', body: fd });
         const data = await res.json();
         if (!res.ok || !data.success) {
           errors.push({ name: f.name, error: data.error || `HTTP ${res.status}`, hint: data.hint });
@@ -115,7 +124,7 @@ export default function UmDashboard() {
   const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
   const commitRules = async () => {
-    await fetch('/api/commit-rules', { method: 'POST', body: JSON.stringify(staging.rules) });
+    await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(staging.rules) });
     setStaging(null);
     setFiles([]);
   };
@@ -156,7 +165,10 @@ export default function UmDashboard() {
             P2P Exchange
           </button>
         </div>
-        <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded">SYSTEM: ONLINE</span>
+        <div className="flex items-center gap-2">
+          <ResetDemoButton />
+          <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded">SYSTEM: ONLINE</span>
+        </div>
       </div>
 
       {/* Rules & Schema tab — Rules Explorer + Schema Explorer + Pipeline */}
@@ -199,6 +211,7 @@ export default function UmDashboard() {
               rules against the {ruleCount} already in active CRD memory.
             </p>
             <PreIngestedButton ruleCount={ruleCount} />
+            <EmptyStateResetLink />
           </div>
         )}
 
@@ -209,6 +222,7 @@ export default function UmDashboard() {
             removeFile={removeFile}
             onSubmit={handleUpload}
             isProcessing={isProcessing}
+            extractorAvailable={extractorAvailable}
           />
         ) : (
           <StagingReview
@@ -231,9 +245,9 @@ export default function UmDashboard() {
                 45 CFR 156.221(b) — Da Vinci PDex IG · SMART on FHIR v2 (backend-services) · Effective Jan 1, 2027
               </p>
             </div>
-            <a href="/patient" className="text-xs text-blue-400 hover:text-blue-300 underline">
+            <Link href="/patient" className="text-xs text-blue-400 hover:text-blue-300 underline">
               Patient Access portal →
-            </a>
+            </Link>
           </div>
           <ProviderAccessPanel />
         </div>
@@ -258,7 +272,7 @@ export default function UmDashboard() {
             <button
               onClick={async () => {
                 if (!confirm('Clear the Live Traffic Feed? Rules and schema are untouched.')) return;
-                await fetch('/api/logs/clear', { method: 'POST' });
+                await fetch(apiUrl('/api/logs/clear'), { method: 'POST' });
               }}
               className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1 rounded"
             >
@@ -294,6 +308,65 @@ export default function UmDashboard() {
   );
 }
 
+function ResetDemoButton() {
+  const [busy, setBusy] = useState(false);
+  const reset = async () => {
+    if (
+      !confirm(
+        'Restore the demo to its seeded baseline? The rule index, live feed, and pending requests return to the first-boot state.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await fetch(apiUrl('/api/demo/reset?mode=seeded'), { method: 'POST' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={reset}
+      disabled={busy}
+      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1 rounded disabled:opacity-50"
+      title="Restore snapshot rules and replayed demo traffic"
+    >
+      {busy ? 'Resetting…' : 'Reset demo'}
+    </button>
+  );
+}
+
+function EmptyStateResetLink() {
+  const [busy, setBusy] = useState(false);
+  const resetEmpty = async () => {
+    if (
+      !confirm(
+        'Clear all rules and the live feed? This leaves an empty index so the upload → staging → commit pipeline can be walked through from a cold start. Use Reset demo to return to the seeded baseline.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await fetch(apiUrl('/api/demo/reset?mode=empty'), { method: 'POST' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={resetEmpty}
+      disabled={busy}
+      className="mt-2 text-xs text-gray-400 hover:text-gray-200 underline disabled:opacity-50"
+    >
+      {busy ? 'Clearing…' : 'Reset to an empty index (for the upload walkthrough)'}
+    </button>
+  );
+}
+
 function PreIngestedButton({ ruleCount = 0 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -304,7 +377,7 @@ function PreIngestedButton({ ruleCount = 0 }) {
     }
     setLoading(true);
     setResult(null);
-    const res = await fetch('/api/rules/load-pre-ingested', { method: 'POST' });
+    const res = await fetch(apiUrl('/api/rules/load-pre-ingested'), { method: 'POST' });
     const data = await res.json();
     setResult(data);
     setLoading(false);
@@ -349,13 +422,21 @@ function PreIngestedButton({ ruleCount = 0 }) {
   );
 }
 
-function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing }) {
+function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extractorAvailable = true }) {
   return (
     <form onSubmit={onSubmit}>
+      {!extractorAvailable && (
+        <div className="mb-3 bg-amber-950/40 border border-amber-700 rounded p-3 text-xs text-amber-200">
+          Live PDF extraction is unavailable on this host because Python with
+          pdfplumber was not found. The pre-ingested snapshot above covers the
+          same four grids, so the rest of the demo is unaffected.
+        </div>
+      )}
       <div className="flex gap-4 items-start flex-wrap">
         <input
           type="file"
           multiple
+          disabled={!extractorAvailable}
           onChange={(e) =>
             setFiles((prev) => {
               const incoming = Array.from(e.target.files || []);
@@ -376,7 +457,7 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing }) {
         />
         <button
           type="submit"
-          disabled={files.length === 0 || isProcessing}
+          disabled={files.length === 0 || isProcessing || !extractorAvailable}
           className="bg-blue-600 px-4 py-2 rounded text-white font-bold disabled:opacity-50 whitespace-nowrap"
         >
           {isProcessing

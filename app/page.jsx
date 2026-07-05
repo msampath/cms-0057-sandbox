@@ -1,52 +1,165 @@
 import Link from 'next/link';
 
+const REPO_URL = 'https://github.com/msampath/cms-0057-demo';
+
+const REG_FACTS = [
+  { label: 'Final rule', value: 'CMS-0057-F' },
+  { label: 'Regulation', value: '45 CFR 156.221' },
+  { label: 'API compliance date', value: 'January 1, 2027' },
+  { label: 'Operational provisions', value: 'January 1, 2026' }
+];
+
+const API_MAP = [
+  { cite: '156.221(d)', api: 'Prior Authorization API (CRD → DTR → PAS)', where: '/ehr + /um Live Traffic Feed' },
+  { cite: '156.221(a)', api: 'Patient Access API', where: '/patient' },
+  { cite: '156.221(b)', api: 'Provider Access API', where: '/um Provider Access tab' },
+  { cite: '156.221(c)', api: 'Payer-to-Payer API ($member-match)', where: '/um P2P Exchange tab' }
+];
+
+const START_PATH = [
+  { href: '/um', label: '/um', text: 'Open the UM dashboard. The rule index is pre-loaded; search 70553 in the Rules Explorer to see the MRI Brain rule, its Carelon routing, and its provenance back to the source PDF page.' },
+  { href: '/ehr', label: '/ehr', text: 'Open the EHR as Jane Doe and sign the MRI Brain order. A CDS Hooks card returns with the DTR questionnaire link; complete it and submit the PAS request.' },
+  { href: '/um', label: '/um', text: 'Back in the UM dashboard, watch the Live Traffic Feed. Expand the FHIR ↔ X12 drawer on the X12 278 REQUEST entry to inspect the field-to-segment mapping.' },
+  { href: '/patient', label: '/patient', text: 'Open the patient portal as Jane Doe. The same determination appears in her prior authorization history through the Patient Access API.' },
+  { href: '/um', label: '/um', text: 'In the P2P Exchange tab, run $member-match for a newly enrolled member and retrieve the prior plan PA history.' }
+];
+
 export default function Landing() {
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-slate-100 flex items-center justify-center p-8">
-      <div className="max-w-2xl w-full">
-        <div className="text-xs uppercase tracking-widest text-emerald-400 mb-2">
-          CMS-0057-F Dual-Window Simulator
+    <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-slate-100 p-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Hero */}
+        <div className="text-xs uppercase tracking-widest text-emerald-400 mb-2 mt-4">
+          CMS-0057-F Interoperability Simulator
         </div>
-        <h1 className="text-4xl font-bold mb-3">Interoperability Sandbox</h1>
-        <p className="text-slate-300 mb-8">
-          Two surfaces, one workflow. Start on the payer side to ingest PA
-          grids, commit rules to the CRD engine, then move to the provider
-          side to sign an order and watch the X12 278 translation stream
-          back into the payer&apos;s live feed.
+        <h1 className="text-4xl font-bold mb-3">
+          The four payer APIs of the CMS prior authorization rule, working end to end
+        </h1>
+        <p className="text-slate-300 mb-6 max-w-3xl">
+          A working simulation of the payer side of the CMS Interoperability
+          and Prior Authorization final rule. All four mandated FHIR APIs are
+          implemented, driven by approximately 3,154 rules extracted from the
+          publicly available BCBSIL 2026 prior authorization grid PDFs.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        {/* Regulatory strip */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+          {REG_FACTS.map((f) => (
+            <div key={f.label} className="bg-slate-950/60 border border-slate-700 rounded p-3">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">{f.label}</div>
+              <div className="text-sm font-semibold text-slate-100">{f.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Surface cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <Link
             href="/um"
-            className="block bg-emerald-700 hover:bg-emerald-600 rounded-lg p-6 shadow ring-2 ring-emerald-400"
+            className="block bg-emerald-700 hover:bg-emerald-600 rounded-lg p-5 shadow ring-2 ring-emerald-400"
           >
             <div className="text-xs uppercase tracking-widest text-emerald-200 mb-1">
-              Step 1 &middot; Payer
+              Payer
             </div>
-            <div className="text-2xl font-bold mb-1">UM Dashboard</div>
+            <div className="text-xl font-bold mb-1">UM Dashboard</div>
             <div className="text-sm text-emerald-100">
-              Upload PA grids, review extraction quality gate, commit rules
-              to the CRD engine, then keep this window open for the live
-              EDI/FHIR feed.
+              Rules explorer over the ingested PA grids, live traffic feed with
+              the FHIR ↔ X12 drawer, Provider Access panel, and P2P Exchange.
             </div>
           </Link>
           <Link
             href="/ehr"
-            className="block bg-blue-700 hover:bg-blue-600 rounded-lg p-6 shadow"
+            className="block bg-blue-700 hover:bg-blue-600 rounded-lg p-5 shadow"
           >
             <div className="text-xs uppercase tracking-widest text-blue-200 mb-1">
-              Step 2 &middot; Provider
+              Provider
             </div>
-            <div className="text-2xl font-bold mb-1">EHR Workspace</div>
+            <div className="text-xl font-bold mb-1">EHR Workspace</div>
             <div className="text-sm text-blue-100">
-              Sign an order against the committed rules. CDS Hooks 2.0 card,
-              DTR SMART surface, PAS Bundle submission.
+              Order entry → CDS Hooks card → DTR questionnaire → PAS Bundle
+              submission, with pended and denial paths.
+            </div>
+          </Link>
+          <Link
+            href="/patient"
+            className="block bg-indigo-700 hover:bg-indigo-600 rounded-lg p-5 shadow"
+          >
+            <div className="text-xs uppercase tracking-widest text-indigo-200 mb-1">
+              Member
+            </div>
+            <div className="text-xl font-bold mb-1">Patient Portal</div>
+            <div className="text-sm text-indigo-100">
+              Coverage card, SMART scopes, and the prior authorization history
+              generated by the payer events.
             </div>
           </Link>
         </div>
-        <div className="mt-4 text-xs text-slate-400">
-          Tip: open both windows side by side. The simulator ships with seed
-          rules so Step 2 works even if you skip Step 1, but the full demo
-          story starts at the payer.
+
+        {/* Four-API mapping */}
+        <div className="bg-slate-950/60 border border-slate-700 rounded-lg p-4 mb-8">
+          <div className="text-xs uppercase tracking-widest text-slate-400 mb-3">
+            The four mandated APIs and where they live
+          </div>
+          <div className="space-y-2">
+            {API_MAP.map((row) => (
+              <div key={row.cite} className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3 text-sm">
+                <code className="text-emerald-300 shrink-0 w-28">{row.cite}</code>
+                <span className="text-slate-200 flex-1">{row.api}</span>
+                <code className="text-slate-400 text-xs">{row.where}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Start-here path */}
+        <div className="mb-8">
+          <div className="text-xs uppercase tracking-widest text-slate-400 mb-3">
+            A suggested path through the demo
+          </div>
+          <p className="text-sm text-slate-400 mb-3 max-w-3xl">
+            The simulator boots pre-seeded with the full rule index and a
+            replayed demo session, so every surface has data before the first
+            click. The steps below walk one order through all four APIs.
+          </p>
+          <ol className="space-y-2">
+            {START_PATH.map((step, i) => (
+              <li key={i} className="flex gap-3 text-sm">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-bold">
+                  {i + 1}
+                </span>
+                <span className="text-slate-300">
+                  <Link href={step.href} className="text-blue-300 hover:text-blue-200 underline font-mono text-xs mr-1.5">
+                    {step.label}
+                  </Link>
+                  {step.text}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-700 pt-4 pb-8 text-xs text-slate-400 space-y-2">
+          <div>
+            <a
+              href={REPO_URL}
+              className="text-blue-300 hover:text-blue-200 underline"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Source on GitHub
+            </a>
+            {' '}· AGPL-3.0 licensed. The source for this deployment is the repository linked above.
+          </div>
+          <div>
+            Demonstration environment with synthetic patients. The rule data
+            comes from publicly available BCBSIL documents. This project is not
+            affiliated with or endorsed by BCBSIL or CMS.
+          </div>
+          <div>
+            The Reset demo control in the UM dashboard restores the seeded
+            baseline at any time.
+          </div>
         </div>
       </div>
     </main>

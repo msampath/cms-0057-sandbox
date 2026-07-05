@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+.claude
+database.json
+start.log
+Dockerfile
+.dockerignore

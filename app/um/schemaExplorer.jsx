@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
+import { apiUrl } from '@/lib/basePath';
 
 const fetcher = (url) => fetch(url).then((r) => r.json());
 
@@ -10,7 +11,7 @@ const fetcher = (url) => fetch(url).then((r) => r.json());
  * gold_card_programs. The rules index is large and lives in its own panel.
  */
 export default function SchemaExplorer() {
-  const { data, isLoading } = useSWR('/api/schema', fetcher, { refreshInterval: 5000 });
+  const { data, isLoading } = useSWR(apiUrl('/api/schema'), fetcher, { refreshInterval: 5000 });
   const [tab, setTab] = useState('payer');
 
   if (isLoading || !data) {

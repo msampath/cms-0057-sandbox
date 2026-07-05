@@ -1,5 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Served at surakshith.com/cms-0057 behind CloudFront (portfolio site owns
+  // the domain root). Hardcoded rather than env-driven so dev, Docker, and
+  // prod all serve identical paths: http://localhost:3000/cms-0057.
+  // next/link and static assets pick this up automatically; literal fetch()
+  // calls in client components go through lib/basePath.js apiUrl().
+  basePath: '/cms-0057',
   reactStrictMode: true,
   webpack: (config) => {
     // Webpack walks up from the project root looking for things to watch.

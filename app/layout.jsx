@@ -1,8 +1,9 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'CMS-0057-F Simulator',
-  description: 'Dual-window Interoperability Simulator for the CMS-0057-F workflow'
+  title: 'CMS-0057-F Interoperability Simulator',
+  description:
+    'A working simulation of the four payer FHIR APIs mandated by the CMS Interoperability and Prior Authorization final rule (CMS-0057-F), driven by real BCBSIL 2026 prior authorization grid data.'
 };
 
 export default function RootLayout({ children }) {
