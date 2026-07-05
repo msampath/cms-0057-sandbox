@@ -76,8 +76,9 @@ export default function PatientAccess() {
             <ScopesCard scopes={data.smartScopes} note={data.smartNote} />
           </div>
 
-          {/* Right column: PA history */}
-          <div className="lg:col-span-2">
+          {/* Right column: EOB claims + PA history */}
+          <div className="lg:col-span-2 space-y-6">
+            <EobCard eobs={data.eobs} />
             <PAHistory events={data.events} />
           </div>
         </div>
@@ -88,6 +89,9 @@ export default function PatientAccess() {
 
 function CoverageCard({ coverage, patient }) {
   if (!coverage) return null;
+  // Coverage is CARIN BB shaped: plan name and type live in class[], the
+  // payer in payor[].display, the benefit year in period.
+  const planClass = coverage.class?.[0];
   return (
     <div className="bg-gray-800 border border-gray-700 rounded p-4">
       <div className="text-xs uppercase tracking-wide text-blue-300 mb-3">Current coverage</div>
@@ -96,13 +100,57 @@ function CoverageCard({ coverage, patient }) {
         DOB {patient?.birthDate} · {patient?.gender}
       </div>
       <div className="space-y-1.5 text-sm">
-        <Row label="Plan" value={coverage.planName} />
-        <Row label="Type" value={coverage.planType} />
-        <Row label="Payer" value={coverage.payer} />
+        <Row label="Plan" value={planClass?.name} />
+        <Row label="Type" value={planClass?.value} />
+        <Row label="Payer" value={coverage.payor?.[0]?.display} />
         <Row label="Member ID" value={coverage.subscriberId} />
         <Row label="Coverage ID" value={coverage.id} mono />
-        <Row label="Benefit year" value={coverage.benefitYear} />
+        <Row label="Benefit period" value={`${coverage.period?.start || '—'} → ${coverage.period?.end || '—'}`} />
         <Row label="Status" value={<span className="text-green-300 font-semibold">Active</span>} />
+      </div>
+    </div>
+  );
+}
+
+function totalByCode(eob, code) {
+  const hit = (eob.total || []).find((t) =>
+    t.category?.coding?.some((c) => c.code === code)
+  );
+  return hit?.amount?.value;
+}
+
+function EobCard({ eobs }) {
+  if (!eobs?.length) return null;
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded p-4">
+      <div className="text-xs uppercase tracking-wide text-cyan-300 mb-3">
+        Claims — ExplanationOfBenefit
+        <span className="ml-2 text-gray-500 normal-case">({eobs.length} on current plan)</span>
+      </div>
+      <table className="text-xs w-full">
+        <thead>
+          <tr className="text-gray-500">
+            <th className="text-left py-1 pr-3">Service date</th>
+            <th className="text-left py-1 pr-3">Service</th>
+            <th className="text-right py-1 pr-3">Billed</th>
+            <th className="text-right py-1 pr-3">Plan paid</th>
+            <th className="text-right py-1">You owe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {eobs.map((eob) => (
+            <tr key={eob.id} className="border-t border-gray-700">
+              <td className="py-1.5 pr-3 text-gray-400">{eob.item?.[0]?.servicedDate}</td>
+              <td className="py-1.5 pr-3 text-gray-200">{eob.item?.[0]?.productOrService?.text}</td>
+              <td className="py-1.5 pr-3 text-right text-gray-200">${totalByCode(eob, 'submitted')?.toLocaleString()}</td>
+              <td className="py-1.5 pr-3 text-right text-green-300">${totalByCode(eob, 'paidtoprovider')?.toLocaleString()}</td>
+              <td className="py-1.5 text-right text-amber-300">${totalByCode(eob, 'memberliability')?.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="text-[11px] text-gray-500 mt-2">
+        Resource profile: <code className="text-gray-400">{eobs[0].meta?.profile?.[0]?.split('/').pop()}</code>
       </div>
     </div>
   );
