@@ -1,14 +1,16 @@
 import { NextResponse } from 'next/server';
-import { getPendingRequest } from '@/lib/db';
+import { finalizePendedIfDue } from '@/lib/pendedReview';
 
 /**
- * Polling endpoint for pended PA requests. Once the clinical review
- * finalizes, `responseBundle` carries the PAS response Bundle
- * (ClaimResponse + coverage-information Task) that the rest-hook
- * notification would deliver in production.
+ * Polling endpoint for pended PA requests. Finalization is request-driven:
+ * once the clinical-review window has elapsed, the first poll to arrive
+ * runs the finalization (lib/pendedReview.js) and receives the PAS
+ * response Bundle that a rest-hook notification would deliver in
+ * production. This keeps the flow correct on scale-to-zero hosts where no
+ * background timer can be trusted to fire.
  */
 export async function GET(request, { params }) {
-  const req = getPendingRequest(params.id);
+  const req = finalizePendedIfDue(params.id);
   if (!req) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({
     status: req.status,

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getDb, logTransaction, addPendingRequest, finalizePendingRequest } from '@/lib/db';
+import { getDb, logTransaction, addPendingRequest } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
 import { PAS_PROFILES, wrapPasResponseBundle } from '@/lib/fhir';
+import { reviewWindow } from '@/lib/pendedReview';
 import {
   generateX12_278,
   generateX12_278_Response,
@@ -215,74 +216,24 @@ export async function POST(request) {
       }
     };
 
+    // Request-driven review clock: the decision becomes due after the
+    // review window and is finalized by the next poll of
+    // /api/pas/pended/[id] (lib/pendedReview.js). No background timer, so
+    // the flow survives scale-to-zero hosts where CPU is only allocated
+    // during requests. Production would use a durable job queue with a
+    // separate worker delivering a real rest-hook notification.
     addPendingRequest(authNumber, {
       authNumber,
       vendor,
       patientId: patient?.id || 'unknown',
       orderedCode,
+      decideAfter: Date.now() + reviewWindow(),
     });
 
     logTransaction('PAS Gateway', 'PA PENDED',
       `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
       { patientId: patient?.id || 'unknown' }
     );
-
-    // PLACEHOLDER: setTimeout simulates a clinical reviewer's async decision.
-    // In production this would be a durable job queue (SQS, Azure Service Bus,
-    // etc.) so the finalization survives server restarts and scales beyond a
-    // single process. The rest-hook notification would fire from a separate
-    // worker, not from within the HTTP request handler.
-    setTimeout(() => {
-      const finalAction = {
-        type: 'update',
-        description: 'Coverage information updated — PA determination finalized after clinical review',
-        resource: {
-          resourceType: 'Task',
-          status: 'completed',
-          intent: 'proposal',
-          code: { coding: [{ system: 'http://hl7.org/fhir/us/davinci-crd/CodeSystem/temp', code: 'coverage-information' }] },
-          for: { reference: `Patient/${patient?.id || 'unknown'}` },
-          authoredOn: new Date().toISOString(),
-          extension: [
-            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
-            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'satisfied' },
-            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: 'http://www.ama-assn.org/go/cpt', code: orderedCode || '' } },
-            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() },
-            { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#satisfied-pa-id', valueString: authNumber }
-          ]
-        }
-      };
-
-      const finalClaimResponse = {
-        resourceType: 'ClaimResponse',
-        id: `cr-final-${Date.now()}`,
-        meta: { profile: [PAS_PROFILES.claimResponse] },
-        status: 'active',
-        type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
-        use: 'preauthorization',
-        patient: { reference: `Patient/${patient?.id || 'unknown'}` },
-        outcome: 'complete',
-        disposition: `Prior Authorization Approved by ${vendor}. Functional impairment criteria met on clinical review.`,
-        preAuthRef: authNumber,
-        insurer: { display: vendor }
-      };
-
-      const finalBundle = wrapPasResponseBundle([
-        finalClaimResponse,
-        finalAction.resource
-      ]);
-
-      finalizePendingRequest(authNumber, { responseBundle: finalBundle });
-
-      logTransaction('Clinical Review Team', 'PA APPROVED (pended → finalized)',
-        `Auth # ${authNumber} — functional impairment criteria met. Determination: APPROVED.`,
-        { patientId: patient?.id || 'unknown' }
-      );
-      logTransaction('PAS Gateway', 'REST-HOOK NOTIFICATION',
-        `Subscription notification fired to EHR rest-hook endpoint per R4 Subscriptions Backport IG.\n\n${JSON.stringify(finalBundle, null, 2)}`,
-        { patientId: patient?.id || 'unknown' }
-      );
-    }, 8000);
 
     return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse]));
   }
