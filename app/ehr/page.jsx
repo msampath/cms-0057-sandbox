@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { apiUrl } from '@/lib/basePath';
+import { getPatient } from '@/lib/patients';
 
 /**
  * Provider EHR + DTR SMART surface.
@@ -129,17 +130,13 @@ const ORDER_OPTIONS = [
 // ---- Patient scenarios -----------------------------------------------------
 // Each scenario drives: patient demographics, plan type, ordering practitioner,
 // and a suggested default order. Switching scenarios resets the order form.
-const PATIENT_SCENARIOS = [
+// Demographics, plan, and practitioner data come from lib/patients.js (the
+// single source of truth shared with the API routes). Only the EHR-specific
+// scenario decoration lives here.
+const SCENARIO_DECORATIONS = [
   {
     id: 'jane-doe',
-    name: 'Jane Doe',
-    dob: '1972-04-14',
-    gender: 'female',
     patientId: 'pat-8849-jane-doe',
-    planType: 'COMM-PPO',
-    coverageId: 'cov-comm-ppo-bcbsil',
-    npi: '1234567890',
-    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
     defaultOrderIndex: 5,
     presetCode: '',
     tag: 'General PA',
@@ -149,14 +146,7 @@ const PATIENT_SCENARIOS = [
   },
   {
     id: 'robert-chen',
-    name: 'Robert Chen',
-    dob: '1955-09-22',
-    gender: 'male',
     patientId: 'pat-7712-robert-chen',
-    planType: 'MA-PPO',
-    coverageId: 'cov-ma-ppo-bcbsil',
-    npi: '1234567890',
-    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
     defaultOrderIndex: 5,
     presetCode: '',
     tag: 'Medicare Advantage',
@@ -166,14 +156,7 @@ const PATIENT_SCENARIOS = [
   },
   {
     id: 'dorothy-hayes',
-    name: 'Dorothy Hayes',
-    dob: '1948-03-07',
-    gender: 'female',
     patientId: 'pat-3301-dorothy-hayes',
-    planType: 'COMM-PPO',
-    coverageId: 'cov-comm-ppo-bcbsil',
-    npi: 'GOLD-NPI-0001',
-    practitioner: { id: 'pract-888-patel', family: 'Patel', given: ['Raj'] },
     defaultOrderIndex: null,
     presetCode: '27447',
     tag: 'Gold Card',
@@ -183,14 +166,7 @@ const PATIENT_SCENARIOS = [
   },
   {
     id: 'marcus-johnson',
-    name: 'Marcus Johnson',
-    dob: '2014-11-19',
-    gender: 'male',
     patientId: 'pat-6614-marcus-johnson',
-    planType: 'COMM-HMO',
-    coverageId: 'cov-comm-hmo-bcbsil',
-    npi: '1234567890',
-    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
     defaultOrderIndex: 10,
     presetCode: '',
     tag: 'Behavioral Health',
@@ -199,6 +175,11 @@ const PATIENT_SCENARIOS = [
     description: 'COMM-HMO, 11 M. ABA therapy with autism Dx; category-match routing to Lucet.',
   },
 ];
+
+const PATIENT_SCENARIOS = SCENARIO_DECORATIONS.map((d) => ({
+  ...getPatient(d.patientId),
+  ...d,
+}));
 
 // ---- Indicator visual conventions ------------------------------------------
 // CDS Hooks 2.0 indicator semantics are normative; rendered colors are an
@@ -237,11 +218,10 @@ const INDICATOR_STYLES = {
 
 // ---- Patient resource builders (scenario-driven) ---------------------------
 function buildPatientResource(scenario, orderConditions) {
-  const parts = scenario.name.split(' ');
   return {
     resourceType: 'Patient',
     id: scenario.patientId,
-    name: [{ family: parts[parts.length - 1], given: parts.slice(0, -1) }],
+    name: [{ family: scenario.family, given: scenario.given }],
     gender: scenario.gender,
     birthDate: scenario.dob,
     condition: orderConditions || []
@@ -253,7 +233,7 @@ function buildCoverageResource(scenario) {
     resourceType: 'Coverage',
     id: scenario.coverageId,
     status: 'active',
-    subscriberId: `BCBSIL-MEM-${scenario.patientId.replace(/\D/g, '').slice(-6)}`,
+    subscriberId: scenario.subscriberId,
     payor: [{ identifier: { value: 'BCBSIL' } }]
   };
 }

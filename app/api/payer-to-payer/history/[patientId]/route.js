@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { PRIOR_PLAN_HISTORY } from '@/lib/db';
+import { PRIOR_PLAN_HISTORY } from '@/lib/patients';
 
 // Returns seeded prior-plan clinical history for a matched member.
 // In production this would be the result of a FHIR $export on the

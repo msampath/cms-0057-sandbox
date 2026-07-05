@@ -1,14 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getLog } from '@/lib/db';
-
-// Static patient demographics keyed by the demo patient IDs.
-// These mirror the PATIENT_SCENARIOS in app/ehr/page.jsx.
-const PATIENT_META = {
-  'pat-8849-jane-doe':    { name: 'Jane Doe',        dob: '1972-04-14', planType: 'COMM-PPO' },
-  'pat-7712-robert-chen': { name: 'Robert Chen',     dob: '1955-09-22', planType: 'MA-PPO'   },
-  'pat-3301-dorothy-hayes':{ name: 'Dorothy Hayes',  dob: '1948-03-07', planType: 'COMM-PPO' },
-  'pat-6614-marcus-johnson':{ name: 'Marcus Johnson', dob: '2014-11-19', planType: 'COMM-HMO' },
-};
+import { getPatient } from '@/lib/patients';
 
 // SMART on FHIR v2 scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -38,7 +30,7 @@ export async function GET(request) {
   for (const entry of relevant) {
     const pid = entry.patientId;
     if (!byPatient.has(pid)) {
-      const meta = PATIENT_META[pid] || {};
+      const meta = getPatient(pid) || {};
       byPatient.set(pid, {
         patientId: pid,
         patientName: meta.name || pid,

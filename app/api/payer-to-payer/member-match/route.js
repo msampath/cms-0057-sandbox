@@ -1,16 +1,9 @@
 import { NextResponse } from 'next/server';
-import { PRIOR_PLAN_HISTORY } from '@/lib/db';
+import { PRIOR_PLAN_HISTORY, PATIENT_ID_BY_SUBSCRIBER } from '@/lib/patients';
 
 // Simulated $member-match endpoint (PDex STU 2.0, §4.2).
 // Accepts a FHIR Parameters body containing MemberPatient + CoverageToMatch.
 // Returns a Parameters response with the matched member identifier.
-
-const PATIENT_ID_BY_SUBSCRIBER = {
-  'BCBSIL-MEM-849': 'pat-8849-jane-doe',
-  'BCBSIL-MEM-712': 'pat-7712-robert-chen',
-  'BCBSIL-MEM-301': 'pat-3301-dorothy-hayes',
-  'BCBSIL-MEM-614': 'pat-6614-marcus-johnson',
-};
 
 // Also allow matching by patientId directly (demo convenience).
 const ALL_PATIENT_IDS = Object.keys(PRIOR_PLAN_HISTORY);

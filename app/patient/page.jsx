@@ -3,13 +3,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { apiUrl } from '@/lib/basePath';
-
-const PATIENTS = [
-  { id: 'pat-8849-jane-doe',        name: 'Jane Doe',        dob: '1972-04-14', planType: 'COMM-PPO' },
-  { id: 'pat-7712-robert-chen',     name: 'Robert Chen',     dob: '1955-09-22', planType: 'MA-PPO'   },
-  { id: 'pat-3301-dorothy-hayes',   name: 'Dorothy Hayes',   dob: '1948-03-07', planType: 'COMM-PPO' },
-  { id: 'pat-6614-marcus-johnson',  name: 'Marcus Johnson',  dob: '2014-11-19', planType: 'COMM-HMO' },
-];
+import { PATIENT_LIST } from '@/lib/patients';
 
 const fetcher = (url) => fetch(url).then((r) => r.json());
 
@@ -55,7 +49,7 @@ export default function PatientAccess() {
       <div className="bg-gray-800 rounded border border-gray-700 p-4 mb-6">
         <label className="text-xs text-gray-400 block mb-2">Select patient (simulates payer portal login)</label>
         <div className="flex gap-2 flex-wrap">
-          {PATIENTS.map((p) => (
+          {PATIENT_LIST.map((p) => (
             <button
               key={p.id}
               onClick={() => setSelectedId(p.id)}

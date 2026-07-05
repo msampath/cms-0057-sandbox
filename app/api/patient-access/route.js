@@ -1,53 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getLog } from '@/lib/db';
-
-// Static patient metadata mirroring PATIENT_SCENARIOS in app/ehr/page.jsx.
-const PATIENT_META = {
-  'pat-8849-jane-doe': {
-    name: 'Jane Doe',
-    dob: '1972-04-14',
-    gender: 'female',
-    planType: 'COMM-PPO',
-    planName: 'Commercial PPO',
-    coverageId: 'cov-comm-ppo-bcbsil',
-    subscriberId: 'BCBSIL-MEM-849',
-    payer: 'Blue Cross Blue Shield of Illinois',
-    benefitYear: '2026',
-  },
-  'pat-7712-robert-chen': {
-    name: 'Robert Chen',
-    dob: '1955-09-22',
-    gender: 'male',
-    planType: 'MA-PPO',
-    planName: 'Medicare Advantage PPO',
-    coverageId: 'cov-ma-ppo-bcbsil',
-    subscriberId: 'BCBSIL-MEM-712',
-    payer: 'Blue Cross Blue Shield of Illinois',
-    benefitYear: '2026',
-  },
-  'pat-3301-dorothy-hayes': {
-    name: 'Dorothy Hayes',
-    dob: '1948-03-07',
-    gender: 'female',
-    planType: 'COMM-PPO',
-    planName: 'Commercial PPO',
-    coverageId: 'cov-comm-ppo-bcbsil',
-    subscriberId: 'BCBSIL-MEM-301',
-    payer: 'Blue Cross Blue Shield of Illinois',
-    benefitYear: '2026',
-  },
-  'pat-6614-marcus-johnson': {
-    name: 'Marcus Johnson',
-    dob: '2014-11-19',
-    gender: 'male',
-    planType: 'COMM-HMO',
-    planName: 'Commercial HMO',
-    coverageId: 'cov-comm-hmo-bcbsil',
-    subscriberId: 'BCBSIL-MEM-614',
-    payer: 'Blue Cross Blue Shield of Illinois',
-    benefitYear: '2026',
-  },
-};
+import { getPatient, PAYER_NAME, BENEFIT_YEAR } from '@/lib/patients';
 
 // SMART on FHIR v2 patient-launch scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -65,7 +18,7 @@ export async function GET(request) {
     return NextResponse.json({ error: 'patientId query parameter is required' }, { status: 400 });
   }
 
-  const meta = PATIENT_META[patientId];
+  const meta = getPatient(patientId);
   if (!meta) {
     return NextResponse.json({ error: `Patient ${patientId} not found` }, { status: 404 });
   }
@@ -102,8 +55,8 @@ export async function GET(request) {
       subscriberId: meta.subscriberId,
       planType: meta.planType,
       planName: meta.planName,
-      payer: meta.payer,
-      benefitYear: meta.benefitYear,
+      payer: PAYER_NAME,
+      benefitYear: BENEFIT_YEAR,
     },
     events,
   });

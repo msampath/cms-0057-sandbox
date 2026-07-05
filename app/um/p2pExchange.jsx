@@ -1,13 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { apiUrl } from '@/lib/basePath';
-
-const PATIENTS = [
-  { id: 'pat-8849-jane-doe',       name: 'Jane Doe',        subscriberId: 'BCBSIL-MEM-849', dob: '1972-04-14' },
-  { id: 'pat-7712-robert-chen',    name: 'Robert Chen',     subscriberId: 'BCBSIL-MEM-712', dob: '1955-09-22' },
-  { id: 'pat-3301-dorothy-hayes',  name: 'Dorothy Hayes',   subscriberId: 'BCBSIL-MEM-301', dob: '1948-03-07' },
-  { id: 'pat-6614-marcus-johnson', name: 'Marcus Johnson',  subscriberId: 'BCBSIL-MEM-614', dob: '2014-11-19' },
-];
+import { PATIENT_LIST, PAYER_NAME } from '@/lib/patients';
 
 function buildMemberMatchRequest(patient) {
   return {
@@ -29,7 +23,7 @@ function buildMemberMatchRequest(patient) {
           resourceType: 'Coverage',
           status: 'active',
           subscriberId: patient.subscriberId,
-          payor: [{ display: 'Blue Cross Blue Shield of Illinois' }],
+          payor: [{ display: PAYER_NAME }],
           period: { start: '2026-01-01', end: '2026-12-31' },
         },
       },
@@ -45,7 +39,7 @@ export default function P2PExchangePanel() {
   const [history, setHistory] = useState(null);
   const [error, setError] = useState(null);
 
-  const patient = PATIENTS.find((p) => p.id === patientId);
+  const patient = PATIENT_LIST.find((p) => p.id === patientId);
 
   const reset = () => {
     setStep('idle');
@@ -116,7 +110,7 @@ export default function P2PExchangePanel() {
               onChange={(e) => { setPatientId(e.target.value); reset(); }}
               className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
             >
-              {PATIENTS.map((p) => (
+              {PATIENT_LIST.map((p) => (
                 <option key={p.id} value={p.id}>{p.name} ({p.subscriberId})</option>
               ))}
             </select>
