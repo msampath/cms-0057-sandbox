@@ -177,6 +177,27 @@ Simulated, by design and labeled in the UI:
 - the transaction log, pending map, and committed rules live in process memory and a local JSON file, reset on restart, and re-seed on first touch. Production would use a persistent FHIR store
 - prior plan histories in the P2P exchange are seed data in `lib/patients.js`, and behavioral health rules are overridden to `managed_by: "Lucet"` because the BCBSIL BH grid lists BCBSIL as the contact while Lucet is the actual BH utilization management vendor
 
+## What I am building next
+
+CMS proposed a follow-on rule, [CMS-0062-P](https://www.federalregister.gov/documents/2026/04/14/2026-07205/medicare-and-medicaid-programs-patient-protection-and-affordable-care-act-interoperability-standards), on April 10, 2026. Public comment closed June 15, 2026, and the rule is not yet finalized as of this writing. Where CMS-0057-F covered non-drug items and services, 0062-P extends prior authorization interoperability to drugs: medical-benefit drugs through the existing FHIR Prior Authorization API (CRD → DTR → PAS), pharmacy-benefit drugs through NCPDP data-exchange standards. It also proposes to formally adopt FHIR, not X12 EDI, as the HIPAA standard for prior-authorization-related transactions, citing specific implementation guide versions: CARIN Blue Button 2.2.0, Da Vinci PDex 2.1.0, CRD 2.2.1, DTR 2.2.0, and PAS 2.2.1, with older STU 2-era versions proposed to retire by January 1, 2028. A new requirement not present in CMS-0057-F: payers would report their FHIR endpoints, capability statement URLs, and technical documentation to CMS for public posting, reverified annually.
+
+**Already partially supported here**, because the conformance pass in this repo happened to land on the same IG versions 0062-P names:
+
+- the PAS response Bundle and ClaimResponse already claim the Da Vinci PAS profiles at the same v2.2.1 (STU 2) the proposed rule cites
+- the CARIN BB ExplanationOfBenefit generator in `lib/eob.js` targets C4BB-ExplanationOfBenefit-Professional-NonClinician v2.2.0, the exact version named
+- the CapabilityStatement at `GET /api/fhir/metadata` and the CDS Hooks discovery endpoint are the same shape as the endpoint and capability-statement reporting 0062-P would require payers to expose, though this repo does not yet simulate submitting that information to a central registry
+
+**Not yet supported, and the near-term roadmap:**
+
+- a drug-benefit prior authorization path: medical-benefit drug codes (J-codes already route through the existing rule engine, but nothing marks them drug-specific) and a pharmacy-benefit path modeled on NCPDP rather than FHIR, which is a different transaction set entirely
+- drug-specific decision timeframes (the proposed rule cites roughly 24 hours for expedited and 72 hours for standard drug requests, depending on the program), distinct from the illustrative 8 second review window the pended-PA demo uses today
+- a simulated FHIR endpoint registry: an endpoint that models submitting this server's own capability statement URL and technical documentation to CMS, and the annual reverification step
+- version-pinned profile references (explicit `|2.2.1` style canonical URLs) rather than the unpinned base URLs used today, so the demo can show conformance to a specific IG version rather than just the latest
+- Da Vinci CDex for structured attachments alongside a PA request, rather than the plain file upload the DTR pane accepts now
+- transaction log persistence across restarts, carried over from before this conformance pass and still open: the log, pending map, and committed rules live in process memory and reset on restart today
+
+A few other candidates I am weighing but have not committed to: bulk FHIR (`$export`) for the Payer-to-Payer history endpoint in place of the current synchronous searchset Bundle, asymmetric SMART client registration (RS256 plus a JWKS endpoint) in place of the shared HS256 demo secret, and a more agentic PDF ingestion pipeline (closer to the hybrid LLM-plus-structural-parsing approach I use professionally) in place of the current pattern-matching extractor. None of these are staged yet, so if one of them matters more than the others for how this repo gets used, that is useful signal for what to build next.
+
 ## Where things live
 
 ```
