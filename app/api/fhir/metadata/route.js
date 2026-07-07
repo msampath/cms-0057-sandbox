@@ -13,7 +13,7 @@ const CAPABILITY_STATEMENT = {
   id: 'cms-0057-demo',
   status: 'active',
   date: '2026-07-05',
-  publisher: 'CMS-0057-F Interoperability Simulator (demo)',
+  publisher: 'CMS-0057-F Interoperability Sandbox (demo)',
   kind: 'instance',
   software: { name: 'cms-0057-demo', version: '2.0.0' },
   implementation: {

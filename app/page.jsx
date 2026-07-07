@@ -30,7 +30,7 @@ export default function Landing() {
       <div className="max-w-4xl mx-auto">
         {/* Hero */}
         <div className="text-xs uppercase tracking-widest text-emerald-400 mb-2 mt-4">
-          CMS-0057-F Interoperability Simulator
+          CMS-0057-F Interoperability Sandbox
         </div>
         <h1 className="text-4xl font-bold mb-3">
           The four payer APIs of the CMS prior authorization rule, working end to end
@@ -117,7 +117,7 @@ export default function Landing() {
             A suggested path through the demo
           </div>
           <p className="text-sm text-slate-400 mb-3 max-w-3xl">
-            The simulator boots pre-seeded with the full rule index and a
+            The sandbox boots pre-seeded with the full rule index and a
             replayed demo session, so every surface has data before the first
             click. The steps below walk one order through all four APIs.
           </p>

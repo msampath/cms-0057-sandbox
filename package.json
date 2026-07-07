@@ -2,7 +2,7 @@
   "name": "cms-0057-demo",
   "version": "2.0.0",
   "private": true,
-  "description": "CMS-0057-F Dual-Window Interoperability Simulator (Next.js 14)",
+  "description": "CMS-0057-F Dual-Window Interoperability Sandbox (Next.js 14)",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "next dev",
