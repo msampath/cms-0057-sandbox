@@ -117,7 +117,7 @@ Added after the initial ship. The sandbox now plugs into public health-IT test t
 - **SMART App Launcher** at `launch.smarthealthit.org` opens `/ehr` as a launched SMART on FHIR app. Public-client PKCE, patient fetched from the launching FHIR server. Verified end to end.
 - **Availity clearinghouse** receives the same PAS Bundle in parallel with the FHIR PAS submission, as a projected X12 278 JSON envelope. Mock mode is the default; live mode uses their free demo tier. Verified in mock, code path built for live.
 - **Inferno by ONC** can run its Da Vinci PAS conformance test kit against the deployed URL. CORS and endpoints verified reachable.
-- **Epic on FHIR** sandbox uses the same SMART launch flow. Documented, ready for client registration.
+- **Epic on FHIR** app registered under CMS Prior Auth use case with a non-production client id. OAuth authorize call reaches Epic's endpoint and the client is accepted, which is as far as Epic's public sandbox goes for third-party apps in this audience+use-case combination. Full round-trip launch stays behind SMART App Launcher for the demo.
 
 Together these fill in the columns the sandbox was missing before: EHR-side callers on the inbound and a clearinghouse on the outbound, with a conformance oracle grading both. See [docs/integrations.md](integrations.md) for setup steps per tool.
 
