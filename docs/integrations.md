@@ -93,11 +93,25 @@ The client id lookup in `app/ehr/launch/page.jsx` keys on the launching FHIR ser
 - **Registration accepted.** Epic issued the client id. The app appears in the developer account's non-production apps list.
 - **OAuth authorize call reaches Epic.** Hitting `/ehr/launch?iss=https://fhir.epic.com/...&launch=<code>` correctly discovers Epic's SMART configuration and redirects the browser to `https://fhir.epic.com/interconnect-fhir-oauth/oauth2/authorize` with the Epic client id and this app's redirect URI. Epic accepts the request rather than rejecting the client, which confirms the registration is correctly wired.
 
-### What is not verified
+### Two paths against Epic
 
-Epic's public sandbox does not currently expose a self-serve EHR launcher for third-party apps registered under Clinicians + CMS Prior Auth. Their CMS Prior Auth flow is typically tested backend-to-backend against a customer's Epic install rather than through the shared sandbox. A full round-trip launch (Epic browser → `/ehr/launch` → authorize → `/ehr/callback` → banner) is therefore not demonstrable against Epic through the developer portal alone.
+**Standalone launch (recommended for demo, self-serve).** Epic's public sandbox supports standalone OAuth 2.0 launches using their published provider test users. This works entirely self-serve. From the live sandbox at `/ehr`, click "Standalone launch → Epic sandbox". The flow:
 
-For the launched-from-a-real-EHR demo beat, Section 3 (SMART App Launcher) is the working proof: same code path, same public-client PKCE flow, same `/ehr` banner, tested end to end.
+1. `/ehr/standalone` redirects to Epic's authorize endpoint with `aud=<Epic R4 base>`, `scope=launch/patient openid fhirUser patient/Patient.read patient/Coverage.read`, and PKCE
+2. Epic shows its login page. Sign in with `FHIRTWO` / `EpicFhir11!` (provider with linked PractitionerRole) or `FHIR` / `EpicFhir11!` (provider without)
+3. Epic prompts to pick a test patient (Camila Lopez, Derrick Lin, Warren McGinnis, etc.)
+4. Epic redirects to `/ehr/callback` with an authorization code
+5. Token exchange completes, and `/ehr` shows the emerald banner with the Epic-launched patient
+
+**EHR launch via LaunchPad (Epic's tool for third-party developers).** Epic exposes a tool called **LaunchPad** under Documentation → SMART on FHIR (OAuth 2.0) → Try It. This is a lightweight harness that fires a real EHR launch at a registered app. It is not linked from the app management page, which is why it is hard to find. Use it if you need to test the launch-context (`iss` + `launch`) code path against Epic without a customer install.
+
+Epic's built-in flow for CMS Prior Auth apps is normally tested backend-to-backend against a customer's Epic install rather than through the developer portal. Standalone plus LaunchPad cover everything a third-party developer can do self-serve.
+
+### Notes
+
+- Epic caches registered API changes for up to 30 minutes. A 403 immediately after registering new scopes usually clears itself with a wait.
+- The Epic sandbox refreshes every Sunday at 8:00 PM Central. Any data written the prior week is wiped, and there may be intermittent errors around that time.
+- The Epic app is currently marked Ready for Production, which locks it from further edits. Adding new scopes or APIs would require a new app registration and a new client id.
 
 ## 5. Availity clearinghouse
 

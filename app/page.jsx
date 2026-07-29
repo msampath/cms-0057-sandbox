@@ -190,7 +190,17 @@ export default function Landing() {
             >
               Behavioral Health
             </a>
-            ). This project is not affiliated with or endorsed by BCBSIL or CMS.
+            ). This project is not affiliated with or endorsed by BCBSIL, CMS, Epic, or Availity.
+          </div>
+          <div>
+            <strong className="text-slate-300">Data use.</strong> This sandbox
+            processes only synthetic patient data by default. When launched
+            from an external EHR sandbox via SMART on FHIR, the launched
+            Patient resource is fetched and displayed for the current
+            browser session only. Nothing is persisted, sold, shared, or
+            used for any secondary purpose. Access tokens live in
+            sessionStorage and clear on tab close or when the &quot;End
+            session&quot; control is used.
           </div>
           <div>
             The Reset demo control in the UM dashboard restores the seeded

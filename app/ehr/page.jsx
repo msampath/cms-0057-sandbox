@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
-import { apiUrl } from '@/lib/basePath';
+import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
 import { PAS_PROFILES } from '@/lib/fhir';
 import {
@@ -559,6 +559,40 @@ export default function EhrDashboard() {
       <h1 className="text-3xl font-bold mb-6 text-blue-900">
         Provider EHR Workspace
       </h1>
+
+      {/* ---- SMART launch: standalone-launch CTA when no session active */}
+      {!launchedSession && (
+        <div className="mb-6 max-w-3xl bg-slate-50 border border-slate-300 rounded-lg p-4 text-sm">
+          <div className="text-xs uppercase tracking-widest text-slate-500 mb-1">
+            SMART on FHIR
+          </div>
+          <div className="text-slate-800 mb-2">
+            Launch this app against an external FHIR sandbox to pull a real
+            patient into the workspace instead of the demo scenarios below.
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <a
+              href={`${BASE_PATH}/ehr/standalone`}
+              className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900"
+            >
+              Standalone launch → Epic sandbox
+            </a>
+            <a
+              href="https://launch.smarthealthit.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs px-3 py-1.5 rounded bg-slate-200 text-slate-800 hover:bg-slate-300"
+            >
+              EHR launch → SMART App Launcher (external)
+            </a>
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            Epic sandbox test users: <code>FHIRTWO</code> / <code>EpicFhir11!</code>
+            (provider with PractitionerRole) or <code>FHIR</code> / <code>EpicFhir11!</code> (provider without).
+            The launched Patient resource is displayed for the current session only, not persisted.
+          </div>
+        </div>
+      )}
 
       {/* ---- SMART launch context banner (external EHR launched us) ---- */}
       {launchedSession && (
