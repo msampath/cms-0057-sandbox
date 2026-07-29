@@ -3,6 +3,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { apiUrl } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
 import { PAS_PROFILES } from '@/lib/fhir';
+import {
+  getLaunchedSession,
+  fetchLaunchedPatient,
+  clearLaunchedSession
+} from '@/lib/smartLaunch';
 
 /**
  * Provider EHR + DTR SMART surface.
@@ -313,6 +318,17 @@ export default function EhrDashboard() {
   const [pasResponse, setPasResponse] = useState(null);
   const [pendedId, setPendedId] = useState(null);
   const [wasPended, setWasPended] = useState(false);
+  const [launchedSession, setLaunchedSession] = useState(null);
+  const [launchedPatient, setLaunchedPatient] = useState(null);
+
+  useEffect(() => {
+    const session = getLaunchedSession();
+    if (!session) return;
+    setLaunchedSession(session);
+    fetchLaunchedPatient(session)
+      .then((p) => setLaunchedPatient(p))
+      .catch(() => setLaunchedPatient(null));
+  }, []);
   const [simulateDenial, setSimulateDenial] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showLogic, setShowLogic] = useState(false);
@@ -520,6 +536,53 @@ export default function EhrDashboard() {
       <h1 className="text-3xl font-bold mb-6 text-blue-900">
         Provider EHR Workspace
       </h1>
+
+      {/* ---- SMART launch context banner (external EHR launched us) ---- */}
+      {launchedSession && (
+        <div className="mb-6 max-w-3xl bg-emerald-50 border-2 border-emerald-500 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="text-sm">
+              <div className="text-xs uppercase tracking-widest text-emerald-700 mb-1">
+                SMART on FHIR launched context
+              </div>
+              <div className="text-emerald-900 font-semibold">
+                Launched from{' '}
+                <code className="bg-emerald-100 px-1 rounded">{new URL(launchedSession.iss).host}</code>
+                {launchedSession.patientId && (
+                  <>
+                    {' '}·{' '}
+                    <code className="bg-emerald-100 px-1 rounded">
+                      Patient/{launchedSession.patientId}
+                    </code>
+                  </>
+                )}
+              </div>
+              {launchedPatient && (
+                <div className="text-emerald-800 mt-1">
+                  {launchedPatient.name?.[0]?.given?.join(' ')} {launchedPatient.name?.[0]?.family}
+                  {launchedPatient.birthDate && ` · DOB ${launchedPatient.birthDate}`}
+                  {launchedPatient.gender && ` · ${launchedPatient.gender}`}
+                </div>
+              )}
+              <div className="text-emerald-700 text-xs mt-2">
+                Scope: <code>{launchedSession.scope}</code>. This banner confirms the OAuth
+                exchange completed and a Patient resource was fetched from the launching EHR.
+                Order authoring below continues to use the sandbox&apos;s seeded scenarios.
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                clearLaunchedSession();
+                setLaunchedSession(null);
+                setLaunchedPatient(null);
+              }}
+              className="text-xs text-emerald-800 underline hover:text-emerald-900 shrink-0"
+            >
+              End session
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ---- Patient / Scenario selector -------------------------------- */}
       <div className="mb-6 max-w-3xl">

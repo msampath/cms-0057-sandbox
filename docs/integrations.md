@@ -32,11 +32,25 @@ Setup:
 
 The sandbox's SMART discovery, `CapabilityStatement`, PAS `Bundle` shape, and token endpoint are all conformance-shaped, so a subset of Inferno tests should pass without modification. Failing tests are useful too: they name the exact spec sections the sandbox does not yet meet.
 
-## 3. SMART App Launcher (Phase 2)
+## 3. SMART App Launcher
 
-The reference [SMART App Launcher](https://launch.smarthealthit.org) can act as an EHR opening the sandbox's `/ehr` surface as a SMART on FHIR app.
+The reference [SMART App Launcher](https://launch.smarthealthit.org) acts as an EHR opening the sandbox's `/ehr` surface as a SMART on FHIR app. This is the reference open-source SMART launcher and the same one Epic and Cerner test against.
 
-Status: launch handling is being added to `/ehr` in a separate phase. Not yet live.
+Setup:
+
+1. Open [launch.smarthealthit.org](https://launch.smarthealthit.org)
+2. Leave defaults (Provider EHR Launch, R4)
+3. App Launch URL: `https://surakshith.com/cms-0057/ehr/launch`
+4. Click **Launch**, pick any practitioner and any patient
+5. The sandbox `/ehr` opens with an emerald banner reading "Launched from launch.smarthealthit.org · Patient/<uuid>" followed by the launched patient's name, DOB, and gender
+
+Under the hood:
+
+- `/ehr/launch` discovers `{iss}/.well-known/smart-configuration`, generates a PKCE verifier + `state`, and redirects the browser to the EHR's authorize endpoint
+- `/ehr/callback` exchanges the returned `code` at the token endpoint, stashes the access token and launched patient ID in sessionStorage, and hands off to `/ehr`
+- `/ehr` reads the sessionStorage, fetches `Patient/<id>` from the launching EHR with the Bearer token, and displays the banner
+
+Public client, PKCE, no secret. Same shape works against any conformant SMART v2 EHR sandbox including Epic.
 
 ## 4. Epic on FHIR (Phase 4)
 
