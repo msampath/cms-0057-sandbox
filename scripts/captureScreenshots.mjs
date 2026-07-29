@@ -2,7 +2,7 @@
  * Capture the README / portfolio screenshots against a running server.
  *
  *   npm run screenshots
- *   BASE_URL=https://cms-0057-demo-420776046740.us-central1.run.app/cms-0057 npm run screenshots
+ *   BASE_URL=https://surakshith.com/cms-0057 npm run screenshots
  *
  * Requires a running instance (default http://localhost:3000/cms-0057).
  * Resets the demo to the seeded baseline first so shots are reproducible,

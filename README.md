@@ -2,7 +2,7 @@
 
 A working model of the payer side of the CMS Interoperability and Prior Authorization final rule (CMS-0057-F). All four mandated FHIR APIs are implemented end to end, driven by approximately 3,154 rules extracted from the publicly available BCBSIL 2026 prior authorization grid PDFs rather than synthetic data.
 
-**Live demo: <https://cms-0057-demo-420776046740.us-central1.run.app/cms-0057>**
+**Live demo: <https://surakshith.com/cms-0057>**
 
 ![Live traffic feed with the FHIR to X12 translation drawer open](docs/screenshots/03-um-feed-translator.png)
 
@@ -76,6 +76,10 @@ Deployment: pushes to `main` build the image in GitHub Actions and deploy to Goo
 
 - [docs/architecture.md](docs/architecture.md) — data flow diagram, how a production build would differ, the full repo map
 - [docs/conformance.md](docs/conformance.md) — what is implemented against the spec, what is simulated and why, how to regenerate the pre-ingested rule snapshot
+
+## How this was built
+
+[docs/case-study.md](docs/case-study.md) covers the timeline, the decisions and the constraints that forced them, the defects that mattered, and where AI sat in the build loop.
 
 ## What I am building next
 
