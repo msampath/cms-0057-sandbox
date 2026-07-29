@@ -35,51 +35,12 @@ export default function Landing() {
         <h1 className="text-4xl font-bold mb-3">
           The four payer APIs of the CMS prior authorization rule, working end to end
         </h1>
-        <p className="text-slate-300 mb-3 max-w-3xl">
+        <p className="text-slate-300 mb-6 max-w-3xl">
           A working model of the payer side of the CMS Interoperability and
           Prior Authorization final rule. All four mandated FHIR APIs are
           implemented end to end, driven by approximately 3,154 rules
           extracted from four publicly available 2026 prior authorization
           grids.
-        </p>
-        <p className="text-slate-300 mb-6 max-w-3xl">
-          The rule data comes from publicly available BCBSIL documents (
-          <a
-            href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-ma-pa-codelist-q2.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-emerald-300 underline hover:text-emerald-200"
-          >
-            Medicare Advantage
-          </a>
-          ,{' '}
-          <a
-            href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-med-surg-pa-code-list.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-emerald-300 underline hover:text-emerald-200"
-          >
-            Commercial Med-Surg
-          </a>
-          ,{' '}
-          <a
-            href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-specialty-pharmacy-pa-code-list.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-emerald-300 underline hover:text-emerald-200"
-          >
-            Specialty Pharmacy
-          </a>
-          ,{' '}
-          <a
-            href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-bh-pa-code-list.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-emerald-300 underline hover:text-emerald-200"
-          >
-            Behavioral Health
-          </a>
-          ).
         </p>
 
         {/* Regulatory strip */}
@@ -193,8 +154,43 @@ export default function Landing() {
           </div>
           <div>
             Demonstration environment with synthetic patients. The rule data
-            comes from publicly available BCBSIL documents. This project is not
-            affiliated with or endorsed by BCBSIL or CMS.
+            comes from publicly available BCBSIL documents (
+            <a
+              href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-ma-pa-codelist-q2.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-300 hover:text-blue-200 underline"
+            >
+              Medicare Advantage
+            </a>
+            ,{' '}
+            <a
+              href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-med-surg-pa-code-list.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-300 hover:text-blue-200 underline"
+            >
+              Commercial Med-Surg
+            </a>
+            ,{' '}
+            <a
+              href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-specialty-pharmacy-pa-code-list.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-300 hover:text-blue-200 underline"
+            >
+              Specialty Pharmacy
+            </a>
+            ,{' '}
+            <a
+              href="https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-bh-pa-code-list.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-300 hover:text-blue-200 underline"
+            >
+              Behavioral Health
+            </a>
+            ). This project is not affiliated with or endorsed by BCBSIL or CMS.
           </div>
           <div>
             The Reset demo control in the UM dashboard restores the seeded
