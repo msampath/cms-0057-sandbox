@@ -14,7 +14,13 @@
 #   service account   github-deploy@halogen-perception-rk8sk.iam.gserviceaccount.com
 #                     roles: run.admin, artifactregistry.writer, iam.serviceAccountUser
 #   WIF pool/provider github / github-oidc, condition:
-#                     assertion.repository == 'msampath/cms-0057-demo'
+#                     assertion.repository == 'msampath/cms-0057-sandbox'
+#                     NOTE: renaming this GitHub repo breaks auth until this
+#                     condition is updated to match. The GCP-side names below
+#                     (service, image) are independent of the repo name and
+#                     stay as cms-0057-demo, because changing the Cloud Run
+#                     service name would change the run.app URL that the
+#                     Firebase Hosting rewrite points at.
 #   registry          us-central1-docker.pkg.dev/halogen-perception-rk8sk/containers
 #
 # The deployed service answers at <run-url>/cms-0057 (the app is built with

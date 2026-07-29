@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-const REPO_URL = 'https://github.com/msampath/cms-0057-demo';
+const REPO_URL = 'https://github.com/msampath/cms-0057-sandbox';
 
 const REG_FACTS = [
   { label: 'Final rule', value: 'CMS-0057-F' },
