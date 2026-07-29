@@ -93,19 +93,21 @@ The client id lookup in `app/ehr/launch/page.jsx` keys on the launching FHIR ser
 - **Registration accepted.** Epic issued the client id. The app appears in the developer account's non-production apps list.
 - **OAuth authorize call reaches Epic.** Hitting `/ehr/launch?iss=https://fhir.epic.com/...&launch=<code>` correctly discovers Epic's SMART configuration and redirects the browser to `https://fhir.epic.com/interconnect-fhir-oauth/oauth2/authorize` with the Epic client id and this app's redirect URI. Epic accepts the request rather than rejecting the client, which confirms the registration is correctly wired.
 
-### Two paths against Epic
+### What actually works against Epic's public sandbox
 
-**Standalone launch (recommended for demo, self-serve).** Epic's public sandbox supports standalone OAuth 2.0 launches using their published provider test users. This works entirely self-serve. From the live sandbox at `/ehr`, click "Standalone launch → Epic sandbox". The flow:
+- **Client registration.** Accepted. Non-production client id issued.
+- **OAuth authorize call.** Reaches Epic. Client id validated, redirect URI validated, ticket generated. Verified against `https://surakshith.com/cms-0057/ehr/standalone`.
+- **Login and patient selection.** **Does not proceed.** Epic silently strips all resource scopes for our app (regardless of whether we send `patient/*.read`, `user/*.read`, or nothing) and then returns "Invalid OAuth 2.0 request." at the Hyperspace login gateway.
 
-1. `/ehr/standalone` redirects to Epic's authorize endpoint with `aud=<Epic R4 base>`, `scope=launch/patient openid fhirUser patient/Patient.read patient/Coverage.read`, and PKCE
-2. Epic shows its login page. Sign in with `FHIRTWO` / `EpicFhir11!` (provider with linked PractitionerRole) or `FHIR` / `EpicFhir11!` (provider without)
-3. Epic prompts to pick a test patient (Camila Lopez, Derrick Lin, Warren McGinnis, etc.)
-4. Epic redirects to `/ehr/callback` with an authorization code
-5. Token exchange completes, and `/ehr` shows the emerald banner with the Epic-launched patient
+The reason is that our app registration uses **CMS Prior Auth** as the use case, which Epic intends for backend CRD/DTR/PAS flows. Epic's public sandbox does not grant standalone browser-facing scopes to CMS Prior Auth apps because the real testing model for those flows is backend-to-backend against a customer Epic install.
 
-**EHR launch via LaunchPad (Epic's tool for third-party developers).** Epic exposes a tool called **LaunchPad** under Documentation → SMART on FHIR (OAuth 2.0) → Try It. This is a lightweight harness that fires a real EHR launch at a registered app. It is not linked from the app management page, which is why it is hard to find. Use it if you need to test the launch-context (`iss` + `launch`) code path against Epic without a customer install.
+A separate Epic app registered under **General** use case would likely allow standalone reads. That would require a new registration and a new client id, since the current app is marked Ready for Production and cannot be edited.
 
-Epic's built-in flow for CMS Prior Auth apps is normally tested backend-to-backend against a customer's Epic install rather than through the developer portal. Standalone plus LaunchPad cover everything a third-party developer can do self-serve.
+**Working alternative for the launched-from-a-real-EHR demo beat:** the SMART App Launcher (Section 3) uses exactly the same code path, same PKCE public client flow, same `/ehr` banner, tested end to end against `launch.smarthealthit.org` with a real test patient (Geoffrey Abbott shown in the case study).
+
+### LaunchPad, mentioned but not usable here
+
+Epic exposes a tool called **LaunchPad** under Documentation → SMART on FHIR (OAuth 2.0) → Try It. It is a lightweight harness for firing an EHR launch at a registered app. Subject to the same use-case restriction as standalone — LaunchPad against our CMS Prior Auth app hits the same Epic policy wall. LaunchPad is useful for General-use-case apps.
 
 ### Notes
 

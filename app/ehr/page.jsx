@@ -572,24 +572,29 @@ export default function EhrDashboard() {
           </div>
           <div className="flex gap-3 flex-wrap">
             <a
-              href={`${BASE_PATH}/ehr/standalone`}
-              className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900"
-            >
-              Standalone launch → Epic sandbox
-            </a>
-            <a
               href="https://launch.smarthealthit.org"
               target="_blank"
               rel="noopener noreferrer"
+              className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900"
+            >
+              Launch via SMART App Launcher (verified)
+            </a>
+            <a
+              href={`${BASE_PATH}/ehr/standalone`}
               className="text-xs px-3 py-1.5 rounded bg-slate-200 text-slate-800 hover:bg-slate-300"
             >
-              EHR launch → SMART App Launcher (external)
+              Standalone launch → Epic sandbox (limited)
             </a>
           </div>
           <div className="text-xs text-slate-500 mt-2">
-            Epic sandbox test users: <code>FHIRTWO</code> / <code>EpicFhir11!</code>
-            (provider with PractitionerRole) or <code>FHIR</code> / <code>EpicFhir11!</code> (provider without).
-            The launched Patient resource is displayed for the current session only, not persisted.
+            SMART App Launcher is the working end-to-end demo path: pick a
+            practitioner and patient at{' '}
+            <code>launch.smarthealthit.org</code>, land back here with the
+            patient displayed. Epic sandbox reaches the OAuth handshake but
+            our CMS Prior Auth app registration is not granted standalone
+            scopes by Epic&apos;s policy; that path is included as an
+            artifact of registration rather than a full launch. Launched
+            data is displayed for the current session only, never persisted.
           </div>
         </div>
       )}
