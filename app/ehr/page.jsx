@@ -320,6 +320,8 @@ export default function EhrDashboard() {
   const [wasPended, setWasPended] = useState(false);
   const [launchedSession, setLaunchedSession] = useState(null);
   const [launchedPatient, setLaunchedPatient] = useState(null);
+  const [availityResult, setAvailityResult] = useState(null);
+  const [availityLoading, setAvailityLoading] = useState(false);
 
   useEffect(() => {
     const session = getLaunchedSession();
@@ -510,19 +512,40 @@ export default function EhrDashboard() {
     };
 
     setWasPended(false);
-    const res = await fetch(apiUrl('/api/pas/submit'), {
-      method: 'POST',
-      body: JSON.stringify(bundle)
-    });
-    const data = await res.json();
-    const { claimResponse, task } = extractPasResponse(data);
-    if (claimResponse?.outcome === 'queued') {
-      setPendedId(claimResponse.preAuthRef);
-      setPasResponse(claimResponse);
-    } else {
-      setPasResponse(claimResponse);
-      setSystemAction(task || systemAction);
+    setAvailityResult(null);
+    setAvailityLoading(true);
+
+    // FHIR PAS to the payer directly (per CMS-0057-F) and X12 278 in JSON
+    // to the Availity clearinghouse (the legacy channel) go out in
+    // parallel. Both take the same PAS Bundle as input.
+    const [pasResult, availityResp] = await Promise.allSettled([
+      fetch(apiUrl('/api/pas/submit'), {
+        method: 'POST',
+        body: JSON.stringify(bundle)
+      }).then((r) => r.json()),
+      fetch(apiUrl('/api/availity/service-review'), {
+        method: 'POST',
+        body: JSON.stringify(bundle)
+      })
+        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+        .catch((e) => ({ ok: false, status: 0, json: { error: e.message } }))
+    ]);
+
+    if (pasResult.status === 'fulfilled') {
+      const data = pasResult.value;
+      const { claimResponse, task } = extractPasResponse(data);
+      if (claimResponse?.outcome === 'queued') {
+        setPendedId(claimResponse.preAuthRef);
+        setPasResponse(claimResponse);
+      } else {
+        setPasResponse(claimResponse);
+        setSystemAction(task || systemAction);
+      }
     }
+    if (availityResp.status === 'fulfilled') {
+      setAvailityResult(availityResp.value);
+    }
+    setAvailityLoading(false);
     setShowDtr(false);
     setLoading(false);
   };
@@ -924,6 +947,52 @@ export default function EhrDashboard() {
           {wasPended && (
             <div className="text-xs mt-2 text-green-700 bg-green-100 px-2 py-1 rounded font-mono">
               Received via rest-hook notification — pended request finalized after clinical review.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Availity clearinghouse parallel path ------------------------------ */}
+      {(availityLoading || availityResult) && (
+        <div className="bg-sky-50 border-2 border-sky-600 text-sky-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
+          <div className="text-xs uppercase tracking-widest text-sky-700 mb-1">
+            Availity clearinghouse (parallel X12 278 path)
+          </div>
+          {availityLoading && !availityResult ? (
+            <div className="text-sm">Submitting to Availity Service Reviews demo tier...</div>
+          ) : availityResult?.ok ? (
+            <>
+              <div className="font-bold">
+                ✓ {availityResult.json?.response?.statusDescription || 'Response received'}
+              </div>
+              <div className="text-sm mt-1">
+                Cert #:{' '}
+                <code className="bg-white px-1 rounded">
+                  {availityResult.json?.response?.certificationNumber}
+                </code>{' '}
+                · Control #:{' '}
+                <code className="bg-white px-1 rounded">
+                  {availityResult.json?.response?.controlNumber}
+                </code>{' '}
+                · Mode:{' '}
+                <code className="bg-white px-1 rounded">{availityResult.json?.mode}</code>
+              </div>
+              {availityResult.json?.response?._mock && (
+                <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
+                  Mock response. Set AVAILITY_CLIENT_ID and AVAILITY_CLIENT_SECRET on
+                  Cloud Run to route to the real Availity demo tier.
+                </div>
+              )}
+              <details className="mt-2 text-xs">
+                <summary className="cursor-pointer text-sky-700">Show request/response JSON</summary>
+                <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
+                  {JSON.stringify(availityResult.json, null, 2)}
+                </pre>
+              </details>
+            </>
+          ) : (
+            <div className="text-sm">
+              Availity call failed: {availityResult?.json?.error || `HTTP ${availityResult?.status}`}
             </div>
           )}
         </div>

@@ -58,11 +58,33 @@ Epic's free developer sandbox at [fhir.epic.com](https://fhir.epic.com) supports
 
 Status: requires app registration on Epic's side, plus the SMART launch handler from Phase 2. Not yet live.
 
-## 5. Availity clearinghouse (Phase 3)
+## 5. Availity clearinghouse
 
 Availity's [developer portal](https://developer.availity.com/partner/gettingstarted) exposes an X12 278 Service Reviews API for prior authorization requests, with a free demo tier that returns canned responses via the `X-Api-Mock-Scenario-ID` header.
 
-Status: outbound integration in progress. When live, the sandbox will optionally submit the same PAS request to Availity's clearinghouse endpoint in addition to the FHIR PAS path, mirroring how a large health system would route a 278 today.
+Every PAS submission from `/ehr` now fans out in parallel: the FHIR PAS Bundle goes to the sandbox's own payer endpoint, and the same Bundle is projected to Availity's JSON envelope and posted to their Service Reviews API. The approved PA card and the Availity certified card appear side by side in the EHR.
+
+Mode indicator on each response:
+
+- `live` — real HTTP call to `qua.api.availity.com/arp/ar-routing/external`, credentials configured
+- `mock-no-credentials` — canned local response; no outbound call made because `AVAILITY_CLIENT_ID` / `AVAILITY_CLIENT_SECRET` are not set
+- `mock-forced` — canned response even though credentials are present (`AVAILITY_MOCK=on`)
+- `disabled` — `AVAILITY_ENABLED=off`, integration returns 501
+
+Enabling live mode:
+
+1. [Sign up at developer.availity.com](https://developer.availity.com/partner/gettingstarted)
+2. Complete email verification and MFA
+3. Create an organization, then a Demo-plan application
+4. Subscribe the app to the Service Reviews API (Demo subscriptions are auto-approved)
+5. Copy the client_id and client_secret
+6. Set `AVAILITY_CLIENT_ID`, `AVAILITY_CLIENT_SECRET` on Cloud Run:
+   ```powershell
+   gcloud run services update cms-0057-demo --region us-central1 `
+     --update-env-vars AVAILITY_CLIENT_ID=<id>,AVAILITY_CLIENT_SECRET=<secret>
+   ```
+
+The projection module is at `lib/availity.js` and the outbound endpoint is `app/api/availity/service-review/route.js`. Requests are logged to the UM transaction feed with actor `AVAILITY`.
 
 ## Confirming the sandbox is reachable
 
