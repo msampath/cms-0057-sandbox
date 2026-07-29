@@ -78,6 +78,7 @@ Deployment: pushes to `main` build the image in GitHub Actions and deploy to Goo
 
 - [docs/architecture.md](docs/architecture.md) — data flow diagram, how a production build would differ, the full repo map
 - [docs/conformance.md](docs/conformance.md) — what is implemented against the spec, what is simulated and why, how to regenerate the pre-ingested rule snapshot
+- [docs/integrations.md](docs/integrations.md) — connecting the deployed sandbox to public health-IT test tools (CDS Hooks Sandbox, Inferno, SMART App Launcher, Epic, Availity)
 
 ## How this was built
 
