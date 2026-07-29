@@ -80,6 +80,18 @@ Deployment: pushes to `main` build the image in GitHub Actions and deploy to Goo
 - [docs/conformance.md](docs/conformance.md) — what is implemented against the spec, what is simulated and why, how to regenerate the pre-ingested rule snapshot
 - [docs/integrations.md](docs/integrations.md) — connecting the deployed sandbox to public health-IT test tools (CDS Hooks Sandbox, Inferno, SMART App Launcher, Epic, Availity)
 
+## Connectable to real test tools
+
+The sandbox plugs into public health-IT test tools without special configuration:
+
+- CDS Hooks Sandbox → the CRD engine, via the discovery URL
+- SMART App Launcher → `/ehr` as a launched SMART app (public-client PKCE, verified end to end)
+- Availity clearinghouse → parallel X12 278 submission alongside the FHIR PAS path (mock mode by default, credentials optional)
+- Inferno by ONC → the four FHIR APIs for conformance testing
+- Epic on FHIR sandbox → same SMART launch flow, subject to Epic client registration
+
+Setup for each is in [docs/integrations.md](docs/integrations.md).
+
 ## How this was built
 
 [docs/case-study.md](docs/case-study.md) covers the timeline, the decisions and the constraints that forced them, the defects that mattered, and where AI sat in the build loop.

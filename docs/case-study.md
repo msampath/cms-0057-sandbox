@@ -109,6 +109,18 @@ The trade for $0 is a cold start of a few seconds after an idle period, and in-m
 
 ---
 
+## External integrations
+
+Added after the initial ship. The sandbox now plugs into public health-IT test tools, so its story is not "this thing runs by itself" but "this thing sits in a real ecosystem":
+
+- **CDS Hooks Sandbox** at `sandbox.cds-hooks.org` calls the CRD engine via the discovery URL. Zero code, just CORS. Verified.
+- **SMART App Launcher** at `launch.smarthealthit.org` opens `/ehr` as a launched SMART on FHIR app. Public-client PKCE, patient fetched from the launching FHIR server. Verified end to end.
+- **Availity clearinghouse** receives the same PAS Bundle in parallel with the FHIR PAS submission, as a projected X12 278 JSON envelope. Mock mode is the default; live mode uses their free demo tier. Verified in mock, code path built for live.
+- **Inferno by ONC** can run its Da Vinci PAS conformance test kit against the deployed URL. CORS and endpoints verified reachable.
+- **Epic on FHIR** sandbox uses the same SMART launch flow. Documented, ready for client registration.
+
+Together these fill in the columns the sandbox was missing before: EHR-side callers on the inbound and a clearinghouse on the outbound, with a conformance oracle grading both. See [docs/integrations.md](integrations.md) for setup steps per tool.
+
 ## Still open
 
 Carried in the README roadmap, roughly in the order I would pick them up:

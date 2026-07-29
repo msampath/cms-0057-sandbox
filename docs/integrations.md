@@ -4,6 +4,25 @@ The sandbox is reachable from public health-IT test tools. Every API endpoint se
 
 Base URL for everything below: `https://surakshith.com/cms-0057`.
 
+## Quick reference
+
+| Integration | Side | Signup needed | Verified end to end |
+|---|---|---|---|
+| [CDS Hooks Sandbox](#1-cds-hooks-sandbox) | EHR-facing (inbound) | No | Direct URL registration |
+| [Inferno by ONC](#2-inferno-by-onc) | Conformance oracle | No | Run test kit against live URL |
+| [SMART App Launcher](#3-smart-app-launcher) | EHR-facing (inbound) | No | Yes, provider-EHR launch |
+| [Epic on FHIR](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Needs Epic client registration |
+| [Availity](#5-availity-clearinghouse) | Clearinghouse (outbound) | Yes for live mode | Mock mode verified, live mode needs credentials |
+
+## Setup order, quickest first
+
+1. **CDS Hooks Sandbox** — no signup. Paste `https://surakshith.com/cms-0057/api/cds-services` into their Services config. Done in about a minute.
+2. **SMART App Launcher** — no signup. Paste `https://surakshith.com/cms-0057/ehr/launch` into the App Launch URL field and click Launch. Done in about a minute.
+3. **Inferno by ONC** — no signup, but running the PAS test kit takes a few minutes to configure and execute.
+4. **Availity mock mode** — already live at `/ehr` on every PAS submission. Nothing to do.
+5. **Availity live mode** — sign up at [developer.availity.com](https://developer.availity.com/partner/gettingstarted), create demo app, set `AVAILITY_CLIENT_ID` and `AVAILITY_CLIENT_SECRET` on Cloud Run. Roughly 30 minutes end to end because of MFA setup and app registration.
+6. **Epic on FHIR** — sign up at [fhir.epic.com](https://fhir.epic.com), register the sandbox as a client, add the redirect URI, wait for approval. Roughly an hour end to end and Epic's turnaround can add days.
+
 ## 1. CDS Hooks Sandbox
 
 The community-hosted [CDS Hooks Sandbox](https://sandbox.cds-hooks.org) simulates an EHR chart-open workflow and invokes external CDS services against seed FHIR data. Point it at the sandbox to see the CRD engine in action from outside.
@@ -52,11 +71,27 @@ Under the hood:
 
 Public client, PKCE, no secret. Same shape works against any conformant SMART v2 EHR sandbox including Epic.
 
-## 4. Epic on FHIR (Phase 4)
+## 4. Epic on FHIR
 
-Epic's free developer sandbox at [fhir.epic.com](https://fhir.epic.com) supports SMART on FHIR launch of external apps and has documented Da Vinci CRD/DTR/PAS sandbox support.
+Epic's free developer sandbox at [fhir.epic.com](https://fhir.epic.com) supports SMART on FHIR launch of external apps and has documented Da Vinci CRD/DTR/PAS sandbox support. The launch code path from Section 3 works against Epic without changes.
 
-Status: requires app registration on Epic's side, plus the SMART launch handler from Phase 2. Not yet live.
+Setup:
+
+1. Sign up at [fhir.epic.com](https://fhir.epic.com)
+2. Verify email, complete Epic's developer terms
+3. Under **Build Apps**, create a new app:
+   - Application Audience: **Clinicians or Administrative Users (Backend)**
+   - SMART on FHIR launch type: **EHR Launch**
+   - App Launch URL: `https://surakshith.com/cms-0057/ehr/launch`
+   - Redirect URIs: `https://surakshith.com/cms-0057/ehr/callback`
+   - Scopes: `launch`, `openid`, `fhirUser`, `patient/Patient.read`, `patient/Coverage.read`
+4. Save. Epic issues a `client_id`.
+5. Update the constant `CLIENT_ID` in `app/ehr/launch/page.jsx` from `cms-0057-sandbox-public` to the Epic-issued value (or add environment-based selection if you want both to coexist).
+6. Use Epic's Sandbox EHR launcher (usually under **Test Launcher** on the app's page) to open the sandbox as a launched app.
+
+Test patients: Camila Lopez, Derrick Lin, Warren McGinnis.
+
+Note: Epic app registration approval can take days. The SMART Launcher in Section 3 covers the "launched from a real EHR" story immediately; Epic adds brand-name credibility once approved.
 
 ## 5. Availity clearinghouse
 
