@@ -1,6 +1,8 @@
 # CMS-0057-F Interoperability Sandbox
 
-A working model of the payer side of the CMS Interoperability and Prior Authorization final rule (CMS-0057-F). All four mandated FHIR APIs are implemented end to end, driven by approximately 3,154 rules extracted from the publicly available BCBSIL 2026 prior authorization grid PDFs rather than synthetic data.
+A working model of the payer side of the CMS Interoperability and Prior Authorization final rule (CMS-0057-F). All four mandated FHIR APIs are implemented end to end, driven by approximately 3,154 rules extracted from four publicly available 2026 prior authorization grids.
+
+The rule data comes from publicly available BCBSIL documents ([Medicare Advantage](https://www.bcbsil.com/docs/provider/il/claims/um/2026-ma-pa-codelist-q2.pdf), [Commercial Med-Surg](https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-med-surg-pa-code-list.pdf), [Specialty Pharmacy](https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-specialty-pharmacy-pa-code-list.pdf), [Behavioral Health](https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-bh-pa-code-list.pdf)).
 
 **Live demo: <https://surakshith.com/cms-0057>**
 
