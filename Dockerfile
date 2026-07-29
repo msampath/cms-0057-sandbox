@@ -7,8 +7,8 @@
 # deployed demo; without it the UM upload form degrades gracefully.
 #
 # Build and run locally:
-#   docker build -t cms-0057-demo .
-#   docker run -p 3000:3000 cms-0057-demo
+#   docker build -t cms-0057-sandbox .
+#   docker run -p 3000:3000 cms-0057-sandbox
 #   open http://localhost:3000/cms-0057
 #
 # The container filesystem is ephemeral across redeploys. That is acceptable

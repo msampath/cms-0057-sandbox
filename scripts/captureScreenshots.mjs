@@ -77,7 +77,7 @@ async function main() {
 
   // 06 — PAS approved (fill required fields, submit, wait out the
   // simulated mainframe latency on the synchronous path)
-  const attachment = join(tmpdir(), 'cms-0057-demo-attachment.txt');
+  const attachment = join(tmpdir(), 'cms-0057-sandbox-attachment.txt');
   writeFileSync(attachment, 'History and physical — demo attachment.\n');
   for (const input of await page.locator('form input[type="file"]').all()) {
     await input.setInputFiles(attachment);

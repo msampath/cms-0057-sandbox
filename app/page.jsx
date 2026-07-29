@@ -36,10 +36,11 @@ export default function Landing() {
           The four payer APIs of the CMS prior authorization rule, working end to end
         </h1>
         <p className="text-slate-300 mb-6 max-w-3xl">
-          A working simulation of the payer side of the CMS Interoperability
-          and Prior Authorization final rule. All four mandated FHIR APIs are
-          implemented, driven by approximately 3,154 rules extracted from the
-          publicly available BCBSIL 2026 prior authorization grid PDFs.
+          A working model of the payer side of the CMS Interoperability and
+          Prior Authorization final rule. All four mandated FHIR APIs are
+          implemented end to end, driven by approximately 3,154 rules
+          extracted from the publicly available BCBSIL 2026 prior
+          authorization grid PDFs rather than synthetic data.
         </p>
 
         {/* Regulatory strip */}

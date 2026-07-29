@@ -116,7 +116,7 @@ Carried in the README roadmap, roughly in the order I would pick them up:
 - Transaction log persistence across restarts
 - Bulk FHIR `$export` for the Payer-to-Payer history endpoint, in place of the synchronous searchset Bundle
 - Asymmetric SMART auth, RS256 plus a JWKS endpoint, in place of the shared HS256 demo secret
-- More agentic PDF ingestion, closer to the hybrid LLM-plus-structural-parsing approach used professionally
+- More agentic PDF ingestion, an LLM classification pass over the text the parser already pulls, with the current regex extractor as a confidence-gated fallback
 - The CMS-0062-P items, since the proposed rule names the same IG versions this repo already targets
 
 ---

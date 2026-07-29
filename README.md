@@ -66,8 +66,8 @@ python -m pip install pdfplumber   # optional, enables live PDF extraction
 Docker (includes Python, so the upload pipeline works):
 
 ```powershell
-docker build -t cms-0057-demo .
-docker run -p 3000:3000 cms-0057-demo
+docker build -t cms-0057-sandbox .
+docker run -p 3000:3000 cms-0057-sandbox
 ```
 
 Deployment: pushes to `main` build the image in GitHub Actions and deploy to Google Cloud Run through keyless Workload Identity Federation (`.github/workflows/deploy-cloudrun.yml`). The service runs with `min-instances 0` and `max-instances 1`, which keeps it inside the Cloud Run always-free tier at demo traffic. The container filesystem and in-memory state reset on scale-to-zero by design, and the first-touch auto-seed rebuilds the demo baseline on every cold start. A manual deploy from a workstation is one command: `gcloud run deploy --source .`.
@@ -101,7 +101,7 @@ CMS proposed a follow-on rule, [CMS-0062-P](https://www.federalregister.gov/docu
 - **Transaction log persistence** — carried over from before this conformance pass; the log, pending map, and committed rules reset on restart today
 - **Bulk FHIR `$export`** — for the Payer-to-Payer history endpoint, in place of the synchronous searchset Bundle
 - **Asymmetric SMART auth** — RS256 plus a JWKS endpoint, in place of the shared HS256 demo secret
-- **More agentic PDF ingestion** — closer to the hybrid LLM-plus-structural-parsing approach used professionally, in place of the current pattern-matching extractor
+- **More agentic PDF ingestion** — an LLM classification pass over the text the parser already pulls, with the current pattern-matching extractor as a confidence-gated fallback
 
 ## License
 

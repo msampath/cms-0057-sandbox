@@ -10,12 +10,12 @@ import { NextResponse } from 'next/server';
 
 const CAPABILITY_STATEMENT = {
   resourceType: 'CapabilityStatement',
-  id: 'cms-0057-demo',
+  id: 'cms-0057-sandbox',
   status: 'active',
   date: '2026-07-05',
   publisher: 'CMS-0057-F Interoperability Sandbox (demo)',
   kind: 'instance',
-  software: { name: 'cms-0057-demo', version: '2.0.0' },
+  software: { name: 'cms-0057-sandbox', version: '2.0.0' },
   implementation: {
     description:
       'Demonstration implementation of the four payer APIs mandated by CMS-0057-F: Prior Authorization (CRD → DTR → PAS), Patient Access, Provider Access, and Payer-to-Payer.'

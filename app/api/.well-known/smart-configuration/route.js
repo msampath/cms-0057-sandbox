@@ -8,7 +8,7 @@ export async function GET(request) {
   const origin = new URL(request.url).origin;
   const base = `${origin}/cms-0057/api`;
   return NextResponse.json({
-    issuer: 'cms-0057-demo-auth',
+    issuer: 'cms-0057-sandbox-auth',
     token_endpoint: `${base}/auth/token`,
     grant_types_supported: ['client_credentials'],
     scopes_supported: [
