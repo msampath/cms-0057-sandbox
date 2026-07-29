@@ -4,9 +4,18 @@ import { beginStandaloneLaunch } from '@/lib/smartLaunch';
 import { BASE_PATH } from '@/lib/basePath';
 
 // Same lookup as /ehr/launch — see comment there.
+// Epic issues two client IDs per app: production and non-production.
+// Non-production is the correct one for sandbox testing per SMART v1
+// convention, but Epic's sandbox is sometimes quirky about which it
+// accepts. Support ?client=prod to swap for debugging.
+const EPIC_HOST = 'fhir.epic.com';
+const EPIC_CLIENTS = {
+  nonprod: '818d7a76-11e0-40b5-b51b-55bb8e86dc87',
+  prod: 'ab954c75-2f75-47c2-8d49-a89d18649276'
+};
 const CLIENT_ID_BY_HOST = {
   'launch.smarthealthit.org': 'cms-0057-sandbox-public',
-  'fhir.epic.com': '818d7a76-11e0-40b5-b51b-55bb8e86dc87'
+  [EPIC_HOST]: EPIC_CLIENTS.nonprod
 };
 const DEFAULT_CLIENT_ID = 'cms-0057-sandbox-public';
 
@@ -16,9 +25,13 @@ const DEFAULT_CLIENT_ID = 'cms-0057-sandbox-public';
 // of test patients.
 const DEFAULT_ISS = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4';
 
-function clientIdFor(iss) {
+function clientIdFor(iss, epicVariant) {
   try {
-    return CLIENT_ID_BY_HOST[new URL(iss).host] || DEFAULT_CLIENT_ID;
+    const host = new URL(iss).host;
+    if (host === EPIC_HOST && epicVariant && EPIC_CLIENTS[epicVariant]) {
+      return EPIC_CLIENTS[epicVariant];
+    }
+    return CLIENT_ID_BY_HOST[host] || DEFAULT_CLIENT_ID;
   } catch {
     return DEFAULT_CLIENT_ID;
   }
@@ -43,8 +56,10 @@ export default function StandaloneLaunchPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const iss = params.get('iss') || DEFAULT_ISS;
+    const epicVariant = params.get('client');
     const redirectUri = `${window.location.origin}${BASE_PATH}/ehr/callback`;
-    const clientId = clientIdFor(iss);
+    const clientId = clientIdFor(iss, epicVariant);
+    setMessage(`Discovering ${new URL(iss).host}... (client_id ${clientId.slice(0, 8)}...)`);
 
     beginStandaloneLaunch({ iss, redirectUri, clientId })
       .then((authorizeUrl) => {
