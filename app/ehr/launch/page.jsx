@@ -10,9 +10,13 @@ import { BASE_PATH } from '@/lib/basePath';
 const CLIENT_ID_BY_HOST = {
   // SMART Health IT reference launcher accepts any string for public apps.
   'launch.smarthealthit.org': 'cms-0057-sandbox-public',
-  // Epic sandbox (fhir.epic.com), non-production. Registered under this
-  // developer account: msampath. Regenerate if the app is deleted.
-  'fhir.epic.com': 'cfb74462-c737-433c-9ceb-b484c4e08261'
+  // Epic sandbox (fhir.epic.com), non-production, General use case.
+  // Registered under developer account: msampath, app "0057Sandbox-General".
+  // A prior CMS Prior Auth app at Epic (client id cfb74462-c737-433c-9ceb-
+  // b484c4e08261) is retained as a registration artifact but is not used
+  // for launches because Epic's CMS Prior Auth policy blocks self-serve
+  // standalone scope grants.
+  'fhir.epic.com': '818d7a76-11e0-40b5-b51b-55bb8e86dc87'
 };
 const DEFAULT_CLIENT_ID = 'cms-0057-sandbox-public';
 

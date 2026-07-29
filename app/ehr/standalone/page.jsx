@@ -6,7 +6,7 @@ import { BASE_PATH } from '@/lib/basePath';
 // Same lookup as /ehr/launch — see comment there.
 const CLIENT_ID_BY_HOST = {
   'launch.smarthealthit.org': 'cms-0057-sandbox-public',
-  'fhir.epic.com': 'cfb74462-c737-433c-9ceb-b484c4e08261'
+  'fhir.epic.com': '818d7a76-11e0-40b5-b51b-55bb8e86dc87'
 };
 const DEFAULT_CLIENT_ID = 'cms-0057-sandbox-public';
 

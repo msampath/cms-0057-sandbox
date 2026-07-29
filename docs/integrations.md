@@ -73,41 +73,54 @@ Public client, PKCE, no secret. Same shape works against any conformant SMART v2
 
 ## 4. Epic on FHIR
 
-Registered at [fhir.epic.com](https://fhir.epic.com) under the developer account `msampath`, non-production client id issued (`cfb74462-c737-433c-9ceb-b484c4e08261`).
+Two Epic app registrations exist under the developer account `msampath`:
 
-App configuration:
+**0057Sandbox-General** (active for launches) — `818d7a76-11e0-40b5-b51b-55bb8e86dc87`
+- Audience: Clinicians or Administrative Users
+- Use case: **General**
+- Grants standalone + EHR launch with `patient/*.read` scopes for our registered APIs
+- This is the client id wired into `app/ehr/launch/page.jsx` and `app/ehr/standalone/page.jsx`
 
-- Application Audience: **Clinicians or Administrative Users**
-- Use Case: **CMS Prior Auth**
+**0057Test** (registration artifact) — `cfb74462-c737-433c-9ceb-b484c4e08261`
+- Audience: Clinicians or Administrative Users
+- Use case: **CMS Prior Auth**
+- Locked as Ready for Production, cannot be edited
+- Epic policy blocks self-serve standalone scope grants for the CMS Prior Auth use case — retained as evidence of the backend-flow registration path, not used for launches
+
+Shared configuration on both:
+
 - App Launch URL: `https://surakshith.com/cms-0057/ehr/launch`
 - Redirect URI: `https://surakshith.com/cms-0057/ehr/callback`
 - Incoming APIs: Patient.Read (Demographics), Coverage.Read (Patient Insurance Information), Encounter.Read (Patient Chart)
-- Outgoing APIs: CDS Hooks Framework, CRD Request
-- Endpoint URI (Epic's outbound target for CDS Hooks): `https://surakshith.com/cms-0057/api/cds-services`
 - SMART v1 scopes, R4, PKCE public client
 
-The client id lookup in `app/ehr/launch/page.jsx` keys on the launching FHIR server's host, so the same code path serves both `launch.smarthealthit.org` and `fhir.epic.com` without a runtime switch.
+The client id lookup keys on the launching FHIR server's host, so the same code path serves both `launch.smarthealthit.org` and `fhir.epic.com` without a runtime switch.
 
 ### What is verified
 
 - **Registration accepted.** Epic issued the client id. The app appears in the developer account's non-production apps list.
 - **OAuth authorize call reaches Epic.** Hitting `/ehr/launch?iss=https://fhir.epic.com/...&launch=<code>` correctly discovers Epic's SMART configuration and redirects the browser to `https://fhir.epic.com/interconnect-fhir-oauth/oauth2/authorize` with the Epic client id and this app's redirect URI. Epic accepts the request rather than rejecting the client, which confirms the registration is correctly wired.
 
-### What actually works against Epic's public sandbox
+### Standalone launch flow
 
-- **Client registration.** Accepted. Non-production client id issued.
-- **OAuth authorize call.** Reaches Epic. Client id validated, redirect URI validated, ticket generated. Verified against `https://surakshith.com/cms-0057/ehr/standalone`.
-- **Login and patient selection.** **Does not proceed.** Epic silently strips all resource scopes for our app (regardless of whether we send `patient/*.read`, `user/*.read`, or nothing) and then returns "Invalid OAuth 2.0 request." at the Hyperspace login gateway.
+From `/ehr`, click "Standalone launch → Epic sandbox". The route at `/ehr/standalone`:
 
-The reason is that our app registration uses **CMS Prior Auth** as the use case, which Epic intends for backend CRD/DTR/PAS flows. Epic's public sandbox does not grant standalone browser-facing scopes to CMS Prior Auth apps because the real testing model for those flows is backend-to-backend against a customer Epic install.
+1. Redirects to Epic's authorize endpoint with `aud=<Epic R4 base>`, the General-app client id, the registered redirect URI, and PKCE
+2. Epic presents its Hyperspace login page
+3. Sign in as `FHIRTWO` / `EpicFhir11!` (provider with linked PractitionerRole) or `FHIR` / `EpicFhir11!` (provider without)
+4. Epic prompts to select a test patient (Camila Lopez, Derrick Lin, Warren McGinnis, Elijah Davis, Linda Ross, Olivia Roberts, Desiree Powell)
+5. Redirect to `/ehr/callback` with authorization code
+6. Token exchange, session stored, redirect to `/ehr`
+7. Emerald banner shows the Epic-launched patient with name, DOB, gender
 
-A separate Epic app registered under **General** use case would likely allow standalone reads. That would require a new registration and a new client id, since the current app is marked Ready for Production and cannot be edited.
+Uses the same PKCE public-client code path as the SMART App Launcher (Section 3), just with a different `iss` and `client_id` resolved by host lookup.
 
-**Working alternative for the launched-from-a-real-EHR demo beat:** the SMART App Launcher (Section 3) uses exactly the same code path, same PKCE public client flow, same `/ehr` banner, tested end to end against `launch.smarthealthit.org` with a real test patient (Geoffrey Abbott shown in the case study).
+### Notes
 
-### LaunchPad, mentioned but not usable here
-
-Epic exposes a tool called **LaunchPad** under Documentation → SMART on FHIR (OAuth 2.0) → Try It. It is a lightweight harness for firing an EHR launch at a registered app. Subject to the same use-case restriction as standalone — LaunchPad against our CMS Prior Auth app hits the same Epic policy wall. LaunchPad is useful for General-use-case apps.
+- Epic caches registered API changes for up to 30 minutes. A 403 immediately after registering new scopes usually clears itself with a wait.
+- The Epic sandbox refreshes every Sunday at 8:00 PM Central. Any data written the prior week is wiped, and there may be intermittent errors around that time.
+- The 0057Sandbox-General app is **not** marked Ready for Production, so it stays editable. Adding new scopes or APIs later does not require a new registration.
+- LaunchPad, under Documentation → SMART on FHIR (OAuth 2.0) → Try It, drives an EHR launch (`iss`+`launch`) rather than standalone. Works against the General app the same way standalone does.
 
 ### Notes
 
