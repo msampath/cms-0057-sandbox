@@ -3,10 +3,26 @@ import { useEffect, useState } from 'react';
 import { beginLaunch } from '@/lib/smartLaunch';
 import { BASE_PATH } from '@/lib/basePath';
 
-// Public client_id — SMART sandboxes (SMART App Launcher, Epic sandbox)
-// accept any string for public apps. Chosen to be identifiable in launcher
-// logs; production against a real EHR would use a registered client id.
-const CLIENT_ID = 'cms-0057-sandbox-public';
+// Per-EHR client_id lookup, keyed by the launching FHIR server's host.
+// Public clients only, no secret. Add a new EHR by registering the app at
+// that vendor's developer portal (launch URL = /ehr/launch, redirect URI
+// = /ehr/callback) and dropping the issued non-production client_id here.
+const CLIENT_ID_BY_HOST = {
+  // SMART Health IT reference launcher accepts any string for public apps.
+  'launch.smarthealthit.org': 'cms-0057-sandbox-public',
+  // Epic sandbox (fhir.epic.com), non-production. Registered under this
+  // developer account: msampath. Regenerate if the app is deleted.
+  'fhir.epic.com': 'cfb74462-c737-433c-9ceb-b484c4e08261'
+};
+const DEFAULT_CLIENT_ID = 'cms-0057-sandbox-public';
+
+function clientIdFor(iss) {
+  try {
+    return CLIENT_ID_BY_HOST[new URL(iss).host] || DEFAULT_CLIENT_ID;
+  } catch {
+    return DEFAULT_CLIENT_ID;
+  }
+}
 
 /**
  * SMART on FHIR EHR launch endpoint.
@@ -38,8 +54,9 @@ export default function LaunchPage() {
     }
 
     const redirectUri = `${window.location.origin}${BASE_PATH}/ehr/callback`;
+    const clientId = clientIdFor(iss);
 
-    beginLaunch({ iss, launch, redirectUri, clientId: CLIENT_ID })
+    beginLaunch({ iss, launch, redirectUri, clientId })
       .then((authorizeUrl) => {
         setMessage(`Redirecting to ${new URL(authorizeUrl).host}...`);
         window.location.assign(authorizeUrl);
