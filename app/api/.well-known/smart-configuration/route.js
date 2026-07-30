@@ -3,9 +3,24 @@ import { NextResponse } from 'next/server';
 /**
  * SMART on FHIR discovery document, served relative to this app's API base
  * per the SMART App Launch convention ([base]/.well-known/smart-configuration).
+ *
+ * Origin must come from the forwarded headers, not request.url. Cloud Run
+ * terminates TLS externally and proxies internally, so request.url inside
+ * the container reflects the internal bind address (localhost) rather
+ * than the public host — Cloud Run does set x-forwarded-host/-proto,
+ * which is the standard way to recover the real origin behind a proxy.
  */
+function resolveOrigin(request) {
+  const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
+  if (forwardedHost) {
+    const forwardedProto = request.headers.get('x-forwarded-proto') || 'https';
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+  return new URL(request.url).origin;
+}
+
 export async function GET(request) {
-  const origin = new URL(request.url).origin;
+  const origin = resolveOrigin(request);
   const base = `${origin}/cms-0057/api`;
   return NextResponse.json({
     issuer: 'cms-0057-sandbox-auth',
