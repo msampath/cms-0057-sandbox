@@ -101,26 +101,34 @@ The client id lookup keys on the launching FHIR server's host, so the same code 
 - **Registration accepted.** Epic issued the client id. The app appears in the developer account's non-production apps list.
 - **OAuth authorize call reaches Epic.** Hitting `/ehr/launch?iss=https://fhir.epic.com/...&launch=<code>` correctly discovers Epic's SMART configuration and redirects the browser to `https://fhir.epic.com/interconnect-fhir-oauth/oauth2/authorize` with the Epic client id and this app's redirect URI. Epic accepts the request rather than rejecting the client, which confirms the registration is correctly wired.
 
-### Standalone launch flow
+### What Epic's public sandbox actually permits
 
-From `/ehr`, click "Standalone launch → Epic sandbox". The route at `/ehr/standalone`:
+Tested against both registrations, both use cases, both non-prod and prod client IDs, both Ready-for-Production. Consistent outcome:
 
-1. Redirects to Epic's authorize endpoint with `aud=<Epic R4 base>`, the General-app client id, the registered redirect URI, and PKCE
-2. Epic presents its Hyperspace login page
-3. Sign in as `FHIRTWO` / `EpicFhir11!` (provider with linked PractitionerRole) or `FHIR` / `EpicFhir11!` (provider without)
-4. Epic prompts to select a test patient (Camila Lopez, Derrick Lin, Warren McGinnis, Elijah Davis, Linda Ross, Olivia Roberts, Desiree Powell)
-5. Redirect to `/ehr/callback` with authorization code
-6. Token exchange, session stored, redirect to `/ehr`
-7. Emerald banner shows the Epic-launched patient with name, DOB, gender
+| Stage | Non-prod client id | Prod client id |
+|---|---|---|
+| Authorize call to Epic | Accepted, ticket generated | Rejected outright |
+| Reaches Hyperspace login page | Yes | No |
+| Resource scopes granted (`patient/Patient.read` etc.) | **No — silently stripped, only `openid fhirUser` kept** | N/A |
+| Login proceeds | No — "Invalid OAuth 2.0 request." with the remaining scopes | N/A |
 
-Uses the same PKCE public-client code path as the SMART App Launcher (Section 3), just with a different `iss` and `client_id` resolved by host lookup.
+Root cause is Epic's intentional business model, not a scope-name issue we can code around: the public sandbox validates that an app can authenticate, but does not grant FHIR resource read scopes to third-party developer apps. Reading actual patient data from Epic requires a customer relationship — an Epic Community Member willing to deploy the app against their non-production or production Epic environment.
+
+The `/ehr/standalone` route accepts `?client=prod` for reproducing the diagnostic, defaults to the sandbox-appropriate non-prod client id.
+
+### The Epic story, honestly framed
+
+- **Registration**: valid, two apps under `msampath`, both marked Ready for Production, both listable to Epic customers
+- **OAuth handshake**: verified against Epic's actual sandbox endpoints, non-prod client id accepted, ticket generated
+- **Resource read**: not attainable through the public sandbox for reasons above; would require customer partnership
+
+Full launched-from-a-real-EHR round trip lives on the SMART App Launcher (Section 3), which is designed for third-party developer testing and permits full resource reads against its test FHIR server.
 
 ### Notes
 
-- Epic caches registered API changes for up to 30 minutes. A 403 immediately after registering new scopes usually clears itself with a wait.
-- The Epic sandbox refreshes every Sunday at 8:00 PM Central. Any data written the prior week is wiped, and there may be intermittent errors around that time.
-- The 0057Sandbox-General app is **not** marked Ready for Production, so it stays editable. Adding new scopes or APIs later does not require a new registration.
-- LaunchPad, under Documentation → SMART on FHIR (OAuth 2.0) → Try It, drives an EHR launch (`iss`+`launch`) rather than standalone. Works against the General app the same way standalone does.
+- Epic caches registered API changes for up to 30 minutes. A 403 immediately after registering new APIs usually clears itself with a wait.
+- The Epic sandbox refreshes every Sunday at 8:00 PM Central. Any data written the prior week is wiped.
+- LaunchPad, under Documentation → SMART on FHIR (OAuth 2.0) → Try It, drives an EHR launch (`iss`+`launch`) rather than standalone. Subject to the same public-sandbox scope grant limitation.
 
 ### Notes
 
