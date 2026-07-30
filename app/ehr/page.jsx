@@ -1101,28 +1101,47 @@ export default function EhrDashboard() {
             Availity clearinghouse (parallel X12 278 path)
           </div>
           {availityLoading && !availityResult ? (
-            <div className="text-sm">Submitting to Availity Service Reviews demo tier...</div>
+            <div className="text-sm">Submitting to Availity Service Reviews...</div>
           ) : availityResult?.ok ? (
             <>
-              <div className="font-bold">
-                ✓ {availityResult.json?.response?.statusDescription || 'Response received'}
-              </div>
+              {availityResult.json?.response?.pending ? (
+                <div className="font-bold flex items-center gap-2">
+                  <span className="inline-block w-3.5 h-3.5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  Still processing at Availity — no determination yet
+                </div>
+              ) : (
+                <div className="font-bold">
+                  ✓ {availityResult.json?.response?.status || 'Response received'}
+                </div>
+              )}
               <div className="text-sm mt-1">
-                Cert #:{' '}
+                {availityResult.json?.response?.certificationNumber && (
+                  <>
+                    Cert #:{' '}
+                    <code className="bg-white px-1 rounded">
+                      {availityResult.json.response.certificationNumber}
+                    </code>{' '}
+                    ·{' '}
+                  </>
+                )}
+                Control #:{' '}
                 <code className="bg-white px-1 rounded">
-                  {availityResult.json?.response?.certificationNumber}
-                </code>{' '}
-                · Control #:{' '}
-                <code className="bg-white px-1 rounded">
-                  {availityResult.json?.response?.controlNumber}
+                  {availityResult.json?.response?.controlNumber || availityResult.json?.response?.id || '—'}
                 </code>{' '}
                 · Mode:{' '}
                 <code className="bg-white px-1 rounded">{availityResult.json?.mode}</code>
               </div>
+              {availityResult.json?.response?.pending && (
+                <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
+                  Availity returned this asynchronously (202 Accepted) and has not
+                  finished checking with the payer within the poll window. A real
+                  client would keep polling <code>{availityResult.json.response.pollUrl}</code>.
+                </div>
+              )}
               {availityResult.json?.response?._mock && (
                 <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
                   Mock response. Set AVAILITY_CLIENT_ID and AVAILITY_CLIENT_SECRET on
-                  Cloud Run to route to the real Availity demo tier.
+                  Cloud Run to route to the real Availity API.
                 </div>
               )}
               <details className="mt-2 text-xs">
