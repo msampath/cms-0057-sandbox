@@ -88,7 +88,7 @@ The sandbox plugs into public health-IT test tools without special configuration
 - SMART App Launcher → `/ehr` as a launched SMART app (public-client PKCE, verified end to end)
 - Availity clearinghouse → parallel X12 278 submission alongside the FHIR PAS path (mock mode by default, credentials optional)
 - Inferno by ONC → the four FHIR APIs for conformance testing
-- Epic on FHIR sandbox → SMART on FHIR launch (working), plus a Backend Services client reading Epic's own test patients via an RS384-signed assertion against a published JWKS (registered, real token exchange attempted, outcome documented honestly)
+- Epic on FHIR sandbox → SMART on FHIR launch (working), plus a Backend Services client that reads Epic's own test patients live via an RS384-signed assertion against a published JWKS
 
 Setup and current status for each is in [docs/integrations.md](docs/integrations.md).
 

@@ -11,7 +11,8 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 | [CDS Hooks Sandbox](#1-cds-hooks-sandbox) | EHR-facing (inbound) | No | Direct URL registration |
 | [Inferno by ONC](#2-inferno-by-onc) | Conformance oracle | No | Run test kit against live URL |
 | [SMART App Launcher](#3-smart-app-launcher) | EHR-facing (inbound) | No | Yes, provider-EHR launch |
-| [Epic on FHIR](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Registered, OAuth accepts client; live launch limited by Epic sandbox |
+| [Epic Backend Services](#4a-epic-backend-services-reading-epics-own-test-patients) | EHR-facing (outbound) | Yes | **Yes — live token exchange, real Patient resources read** |
+| [Epic on FHIR, SMART launch](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Registered, OAuth accepts client; live launch limited by Epic sandbox |
 | [Availity](#5-availity-clearinghouse) | Clearinghouse (outbound) | Yes for live mode | Mock mode verified, live mode needs credentials |
 
 ## Setup order, quickest first
@@ -21,7 +22,8 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 3. **Inferno by ONC** — no signup, but running the PAS test kit takes a few minutes to configure and execute.
 4. **Availity mock mode** — already live at `/ehr` on every PAS submission. Nothing to do.
 5. **Availity live mode** — sign up at [developer.availity.com](https://developer.availity.com/partner/gettingstarted), create demo app, set `AVAILITY_CLIENT_ID` and `AVAILITY_CLIENT_SECRET` on Cloud Run. Roughly 30 minutes end to end because of MFA setup and app registration.
-6. **Epic on FHIR** — already registered (see Section 4). No further work unless the app is deleted or Epic changes their sandbox model to expose a self-serve EHR launcher for CMS Prior Auth apps.
+6. **Epic on FHIR, SMART launch** — already registered (see Section 4). No further work unless the app is deleted or Epic changes their sandbox model to expose a self-serve EHR launcher for CMS Prior Auth apps.
+7. **Epic Backend Services** — already registered and live (see Section 4a). Nothing further to do.
 
 ## 1. CDS Hooks Sandbox
 
@@ -73,19 +75,22 @@ Public client, PKCE, no secret. Same shape works against any conformant SMART v2
 
 ## 4a. Epic Backend Services (reading Epic's own test patients)
 
-Separate from the SMART launch work in Section 4 below, the sandbox is also an **outbound** SMART Backend Services client to Epic: it signs a `client-confidential-asymmetric` JWT assertion with its own RS384 keypair (the same one behind `/api/.well-known/jwks.json`) and exchanges it for a token at Epic's `client_credentials` endpoint, then reads a `Patient` resource. This is the path Epic's own Developer Testing Guide documents for backend apps connecting to the sandbox, and it is the only path that has a real chance of returning actual data for Epic's well-known test patients (Camila Lopez, Derrick Lin, Warren McGinnis, and four others) — the standalone/EHR-launch paths tested in Section 4 do not grant resource scopes to third-party apps in the public sandbox, confirmed empirically in an earlier session.
+**Working, live, verified with real data.** Separate from the SMART launch work in Section 4 below, the sandbox is also an **outbound** SMART Backend Services client to Epic: it signs a `client-confidential-asymmetric` JWT assertion with its own RS384 keypair (the same one behind `/api/.well-known/jwks.json`) and exchanges it for a token at Epic's `client_credentials` endpoint, then reads a `Patient` resource. This is the path Epic's own Developer Testing Guide documents for backend apps connecting to the sandbox, and unlike the standalone/EHR-launch paths in Section 4 — which do not grant resource scopes to third-party apps in the public sandbox, confirmed empirically in an earlier session — this path does grant them.
 
 **Registration**: a third Epic app, Backend Systems audience, General use case, Non-Production JWK Set URL pointed at `https://surakshith.com/cms-0057/api/.well-known/jwks.json`, Incoming APIs `Patient.Read` and `Coverage.Read`. Non-production client id set as `EPIC_BACKEND_CLIENT_ID` on Cloud Run.
 
-**Verified working, independent of Epic's response**:
-- The JWT assertion is built correctly per spec: header `{alg: 'RS384', typ: 'JWT', kid}`, claims `iss = sub = client_id`, `aud = token endpoint`, `jti` nonce, `exp` under 5 minutes
-- The JWKS endpoint is publicly reachable, returns clean JSON with no proxy/WAF interference, confirmed with multiple user agents
-- The client id is stored correctly on Cloud Run, byte for byte
-- The UI panel on `/ehr` renders the live call, the mode badge, and a clean error state with no crash when Epic rejects the request
+**Confirmed working end to end**:
+- Token exchange succeeds against `https://fhir.epic.com/interconnect-fhir-oauth/oauth2/token`
+- `GET .../Patient/erXuFYUfucBZaryVksYEcMg3` returns Camila Lopez's full US Core Patient resource — real address, phone, email, insurance identifiers, language preferences, calculated pronouns extension, managing organization — not a canned stand-in
+- A second patient (Derrick Lin) confirmed the result was not a one-off or cached
+- The transaction log entry lands in the `/um` live feed with `mode: "live"`
+- The `/ehr` panel renders the live call, the mode badge, and the decoded assertion claims
 
-**Current status calling Epic live**: Epic's token endpoint returns `400 invalid_client` on every attempt so far. This is the error a client_credentials server returns when it does not yet recognize the client id / JWKS registration at all — distinct from a scope-grant rejection (which would show up later, as a 403 on the resource read, after a token was successfully issued). Epic's own docs state registration changes can take up to 30 minutes to sync to the sandbox; that is the leading explanation, not yet confirmed. If it turns out to be a permanent restriction rather than a sync delay, that will be recorded here plainly, the same way the standalone-launch limitation is recorded in Section 4.
+**The one wrinkle worth recording**: the first several attempts, spread across roughly 45 minutes right after app registration, all failed with `400 invalid_client`. Every piece of the failure was checked and ruled out on this sandbox's side — the JWT assertion matched spec exactly, the client id was stored correctly on Cloud Run byte for byte, and the JWKS endpoint was cleanly reachable with no proxy interference. The cause was Epic's own documented registration sync delay: their Developer Testing Guide states changes can take up to 30 minutes to propagate to the sandbox, and the very next attempt after that window succeeded with no code or configuration change on either side. If this is being reproduced fresh, budget for that wait after registering the app — retrying immediately will look like a failure that is not one.
 
-**Try it**: `curl https://surakshith.com/cms-0057/api/epic/patient?id=erXuFYUfucBZaryVksYEcMg3` — or the panel on `/ehr`. Without `EPIC_BACKEND_CLIENT_ID` configured, or before Epic's registration syncs, it returns a canned Patient resource (`mode: mock-no-credentials`) so the demo stays usable regardless of Epic's state.
+**Try it**: `curl https://surakshith.com/cms-0057/api/epic/patient?id=erXuFYUfucBZaryVksYEcMg3` — or the panel on `/ehr`. Without `EPIC_BACKEND_CLIENT_ID` configured, it returns a canned Patient resource (`mode: mock-no-credentials`) so the demo stays usable with zero credentials; with it configured, `mode: "live"` and the response above is real.
+
+Epic test patients confirmed reachable this way: Camila Lopez (`erXuFYUfucBZaryVksYEcMg3`), Derrick Lin (`eq081-VQEgP8drUUqCWzHfw3`), and by the same mechanism the other five listed in the panel.
 
 ## 4. Epic on FHIR
 
