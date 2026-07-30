@@ -21,6 +21,21 @@ export default function ProviderAccessPanel() {
   const [npi, setNpi] = useState('1234567890');
   const [queried, setQueried] = useState(null);
   const [expandedPatient, setExpandedPatient] = useState(null);
+  const [optumResult, setOptumResult] = useState(null);
+  const [optumLoading, setOptumLoading] = useState(false);
+
+  const checkOptum = async () => {
+    setOptumResult(null);
+    setOptumLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/optum/provider-member-match'), { method: 'POST' });
+      const json = await res.json();
+      setOptumResult({ ok: res.ok, status: res.status, json });
+    } catch (e) {
+      setOptumResult({ ok: false, json: { error: e.message } });
+    }
+    setOptumLoading(false);
+  };
 
   const { data, isLoading } = useSWR(
     queried ? apiUrl(`/api/provider-access?npi=${encodeURIComponent(queried)}`) : null,
@@ -63,6 +78,63 @@ export default function ProviderAccessPanel() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Optum real Provider Access -- Da Vinci PDex $bulk-member-match */}
+      <div className="bg-violet-950/30 rounded border border-violet-800 p-4">
+        <div className="text-xs uppercase tracking-widest text-violet-400 mb-2">
+          Optum real Provider Access ($bulk-member-match)
+        </div>
+        <p className="text-xs text-gray-400 mb-3">
+          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access attribution concept — Optum&apos;s own Da Vinci PDex bulk member-match, alongside this sandbox&apos;s own panel above.
+        </p>
+        <button
+          onClick={checkOptum}
+          disabled={optumLoading}
+          className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded"
+        >
+          {optumLoading ? 'Querying Optum…' : 'Run $bulk-member-match'}
+        </button>
+
+        {optumResult && (
+          <div className="mt-3">
+            {optumResult.ok ? (
+              <>
+                <div className="text-xs text-violet-300 mb-2">
+                  mode: <span className="font-mono">{optumResult.json.mode}</span>
+                </div>
+                {(() => {
+                  const params = optumResult.json?.response?.parameter || [];
+                  const groups = ['MatchedMembers', 'NonMatchedMembers', 'ConsentConstrainedMembers'];
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {groups.map((name) => {
+                        const group = params.find((p) => p.name === name);
+                        const members = group?.resource?.member || [];
+                        return (
+                          <div key={name} className="bg-gray-900 rounded border border-gray-700 p-2">
+                            <div className="text-xs font-semibold text-violet-300 mb-1">{name}</div>
+                            <div className="text-xs text-gray-400">{members.length} member{members.length !== 1 ? 's' : ''}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                <details className="mt-2">
+                  <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-300">Show request/response JSON</summary>
+                  <pre className="text-xs text-gray-400 bg-gray-950 rounded p-2 mt-1 overflow-x-auto max-h-64">
+                    {JSON.stringify(optumResult.json, null, 2)}
+                  </pre>
+                </details>
+              </>
+            ) : (
+              <div className="text-sm text-red-400">
+                Error: {optumResult.json?.error || `HTTP ${optumResult.status}`}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Results */}

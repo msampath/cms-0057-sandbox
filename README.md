@@ -78,7 +78,7 @@ Deployment: pushes to `main` build the image in GitHub Actions and deploy to Goo
 
 - [docs/architecture.md](docs/architecture.md) — data flow diagram, how a production build would differ, the full repo map
 - [docs/conformance.md](docs/conformance.md) — what is implemented against the spec, what is simulated and why, how to regenerate the pre-ingested rule snapshot
-- [docs/integrations.md](docs/integrations.md) — connecting the deployed sandbox to public health-IT test tools (CDS Hooks Sandbox, Inferno, SMART App Launcher, Epic, Availity)
+- [docs/integrations.md](docs/integrations.md) — connecting the deployed sandbox to public health-IT test tools (CDS Hooks Sandbox, Inferno, SMART App Launcher, Epic, Availity, Optum)
 
 ## Connectable to real test tools
 
@@ -89,6 +89,7 @@ The sandbox plugs into public health-IT test tools without special configuration
 - Availity clearinghouse → parallel X12 278 submission alongside the FHIR PAS path (mock mode by default, credentials optional)
 - Inferno by ONC → the four FHIR APIs for conformance testing
 - Epic on FHIR sandbox → SMART on FHIR launch (working), plus a Backend Services client that reads Epic's own test patients live via an RS384-signed assertion against a published JWKS
+- Optum real payer API → a second, independent payer's own CRD → DTR → PAS chain plus Provider Access $bulk-member-match, live and verified against a real UnitedHealthcare-shaped implementation
 
 Setup and current status for each is in [docs/integrations.md](docs/integrations.md).
 

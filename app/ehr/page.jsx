@@ -386,6 +386,17 @@ export default function EhrDashboard() {
   const [epicResult, setEpicResult] = useState(null);
   const [epicError, setEpicError] = useState(null);
   const [epicLoading, setEpicLoading] = useState(false);
+  // Optum Real Prior Authorization / Provider Access -- a third,
+  // independent payer implementation of the same CMS-0057-F APIs. Three
+  // touch points mirror the three phases of the order flow: order-sign
+  // gets a second real CRD opinion, DTR launch gets a real reference
+  // questionnaire, PAS submit gets a third parallel determination.
+  const [optumOrderSign, setOptumOrderSign] = useState(null);
+  const [optumOrderSignLoading, setOptumOrderSignLoading] = useState(false);
+  const [optumQuestionnaire, setOptumQuestionnaire] = useState(null);
+  const [optumQuestionnaireLoading, setOptumQuestionnaireLoading] = useState(false);
+  const [optumPasResult, setOptumPasResult] = useState(null);
+  const [optumPasLoading, setOptumPasLoading] = useState(false);
 
   useEffect(() => {
     const session = getLaunchedSession();
@@ -422,6 +433,9 @@ export default function EhrDashboard() {
     setAnswers({});
     setSmartContext(null);
     setLoading(false);
+    setOptumOrderSign(null);
+    setOptumQuestionnaire(null);
+    setOptumPasResult(null);
   }, [scenarioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll for pended PA determination every 2 seconds until finalized.
@@ -468,6 +482,7 @@ export default function EhrDashboard() {
     setCqlLibrary(null);
     setAnswers({});
     setSmartContext(null);
+    setOptumOrderSign(null);
     setLoading(true);
 
     const patient = buildPatientResource(scenario, order.conditions);
@@ -497,6 +512,26 @@ export default function EhrDashboard() {
     // own UI rather than only in the UM Dashboard feed.
     setSystemAction(data.systemActions?.[0]?.resource || null);
     setLoading(false);
+
+    // Optum Real Prior Authorization: a second, independent CRD opinion
+    // on the same order, from UnitedHealthcare's actual engine. Only
+    // meaningful for a real service code -- skip for category-only orders.
+    if (order.code && order.code !== 'NOCODE') {
+      setOptumOrderSignLoading(true);
+      fetch(apiUrl('/api/optum/cds-order-sign'), {
+        method: 'POST',
+        body: JSON.stringify({
+          patientId: patient.id,
+          practitionerId: scenario.practitioner.id,
+          code: order.code,
+          display: order.label
+        })
+      })
+        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+        .then((result) => setOptumOrderSign(result))
+        .catch((err) => setOptumOrderSign({ ok: false, json: { error: err.message } }))
+        .finally(() => setOptumOrderSignLoading(false));
+    }
   };
 
   // ---- Phase 3: SMART launch → fetch Questionnaire + CQL -----------------
@@ -546,6 +581,21 @@ export default function EhrDashboard() {
       }
     }
     setLoading(false);
+
+    // Optum Real DTR: a reference panel showing what a real payer's DTR
+    // questionnaire looks like for this kind of request. Informational
+    // only -- the form above continues to drive this sandbox's own PAS
+    // submission.
+    const patient = buildPatientResource(scenario, order.conditions);
+    setOptumQuestionnaireLoading(true);
+    fetch(apiUrl('/api/optum/dtr-questionnaire'), {
+      method: 'POST',
+      body: JSON.stringify({ patientId: patient.id })
+    })
+      .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+      .then((result) => setOptumQuestionnaire(result))
+      .catch((err) => setOptumQuestionnaire({ ok: false, json: { error: err.message } }))
+      .finally(() => setOptumQuestionnaireLoading(false));
   };
 
   // ---- Phase 4: Submit PAS Bundle ----------------------------------------
@@ -578,16 +628,26 @@ export default function EhrDashboard() {
     setWasPended(false);
     setAvailityResult(null);
     setAvailityLoading(true);
+    setOptumPasResult(null);
+    setOptumPasLoading(true);
 
-    // FHIR PAS to the payer directly (per CMS-0057-F) and X12 278 in JSON
-    // to the Availity clearinghouse (the legacy channel) go out in
-    // parallel. Both take the same PAS Bundle as input.
-    const [pasResult, availityResp] = await Promise.allSettled([
+    // Three parallel paths for the same PAS Bundle: FHIR PAS to this
+    // sandbox's own payer engine (per CMS-0057-F), X12 278 in JSON to the
+    // Availity clearinghouse (the legacy channel), and Claim/$submit to
+    // Optum's real, independent implementation of the same Da Vinci PAS
+    // operation.
+    const [pasResult, availityResp, optumResp] = await Promise.allSettled([
       fetch(apiUrl('/api/pas/submit'), {
         method: 'POST',
         body: JSON.stringify(bundle)
       }).then((r) => r.json()),
       fetch(apiUrl('/api/availity/service-review'), {
+        method: 'POST',
+        body: JSON.stringify(bundle)
+      })
+        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+        .catch((e) => ({ ok: false, status: 0, json: { error: e.message } })),
+      fetch(apiUrl('/api/optum/pas-submit'), {
         method: 'POST',
         body: JSON.stringify(bundle)
       })
@@ -609,7 +669,11 @@ export default function EhrDashboard() {
     if (availityResp.status === 'fulfilled') {
       setAvailityResult(availityResp.value);
     }
+    if (optumResp.status === 'fulfilled') {
+      setOptumPasResult(optumResp.value);
+    }
     setAvailityLoading(false);
+    setOptumPasLoading(false);
     setShowDtr(false);
     setLoading(false);
   };
@@ -962,6 +1026,47 @@ export default function EhrDashboard() {
         </div>
       )}
 
+      {/* ---- Optum Real Prior Auth: second independent CRD opinion ----- */}
+      {(optumOrderSignLoading || optumOrderSign) && (
+        <div className="bg-violet-50 border-2 border-violet-600 text-violet-900 px-6 py-4 rounded-lg shadow-sm mb-6 max-w-3xl">
+          <div className="text-xs uppercase tracking-widest text-violet-700 mb-1">
+            Optum Real Prior Authorization (second CRD opinion)
+          </div>
+          {optumOrderSignLoading && !optumOrderSign ? (
+            <div className="text-sm">Checking with UnitedHealthcare&rsquo;s real CRD engine...</div>
+          ) : optumOrderSign?.ok ? (
+            <>
+              <div className="text-sm">
+                {optumOrderSign.json?.cards?.cards?.length || 0} card(s) returned · Mode:{' '}
+                <code className="bg-white px-1 rounded">{optumOrderSign.json?.mode}</code>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {(optumOrderSign.json?.cards?.cards || []).map((c, i) => (
+                  <div key={i} className="text-xs bg-white border border-violet-200 rounded px-2 py-1.5">
+                    <span className="font-bold uppercase text-violet-700">{c.indicator}</span>{' '}
+                    <span className="font-semibold">{c.summary}</span>
+                    {c.detail && <div className="text-violet-800 mt-0.5">{c.detail}</div>}
+                    {c.source?.label && (
+                      <div className="text-violet-500 mt-0.5">Source: {c.source.label}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <details className="mt-2 text-xs">
+                <summary className="cursor-pointer text-violet-700">Show CDS Hooks request/response JSON</summary>
+                <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
+                  {JSON.stringify(optumOrderSign.json, null, 2)}
+                </pre>
+              </details>
+            </>
+          ) : (
+            <div className="text-sm">
+              Optum call failed: {optumOrderSign?.json?.error || `HTTP ${optumOrderSign?.status}`}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ---- Persisted coverage-information Task (Da Vinci CRD) -------- */}
       {systemAction && (
         <details className="bg-white border border-gray-200 rounded-lg max-w-3xl mb-6 shadow-sm">
@@ -1022,6 +1127,55 @@ export default function EhrDashboard() {
           {showLogic && (
             <div className="md:w-1/2 bg-[#1e1e1e] flex flex-col h-[500px] md:h-auto border-l border-gray-700">
               <DeveloperPane questionnaire={questionnaire} cql={cqlLibrary} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- Optum Real DTR: reference questionnaire ------------------- */}
+      {showDtr && (optumQuestionnaireLoading || optumQuestionnaire) && (
+        <div className="bg-violet-50 border-2 border-violet-600 text-violet-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
+          <div className="text-xs uppercase tracking-widest text-violet-700 mb-1">
+            Optum Real DTR (reference questionnaire, informational only)
+          </div>
+          {optumQuestionnaireLoading && !optumQuestionnaire ? (
+            <div className="text-sm">Retrieving a real DTR questionnaire package from Optum...</div>
+          ) : optumQuestionnaire?.ok ? (
+            (() => {
+              const q =
+                optumQuestionnaire.json?.response?.parameter?.[0]?.resource?.entry?.[0]?.resource;
+              return (
+                <>
+                  <div className="text-sm font-bold">{q?.title || 'Questionnaire retrieved'}</div>
+                  <div className="text-xs mt-1 text-violet-700">
+                    Mode: <code className="bg-white px-1 rounded">{optumQuestionnaire.json?.mode}</code>
+                    {q?.publisher && <> · Publisher: {q.publisher}</>}
+                  </div>
+                  {q?.description && (
+                    <div className="text-xs mt-2 text-violet-800">{q.description}</div>
+                  )}
+                  {(q?.item || []).length > 0 && (
+                    <ul className="text-xs mt-2 space-y-1 list-disc list-inside">
+                      {q.item.slice(0, 6).map((it) => (
+                        <li key={it.linkId} className="text-violet-800">
+                          {it.text}{' '}
+                          <span className="text-violet-400">({it.type}{it.required ? ', required' : ''})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-violet-700">Show full response JSON</summary>
+                    <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
+                      {JSON.stringify(optumQuestionnaire.json, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              );
+            })()
+          ) : (
+            <div className="text-sm">
+              Optum call failed: {optumQuestionnaire?.json?.error || `HTTP ${optumQuestionnaire?.status}`}
             </div>
           )}
         </div>
@@ -1154,6 +1308,48 @@ export default function EhrDashboard() {
           ) : (
             <div className="text-sm">
               Availity call failed: {availityResult?.json?.error || `HTTP ${availityResult?.status}`}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Optum Real Prior Auth parallel path (Claim/$submit) --------------- */}
+      {(optumPasLoading || optumPasResult) && (
+        <div className="bg-violet-50 border-2 border-violet-600 text-violet-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
+          <div className="text-xs uppercase tracking-widest text-violet-700 mb-1">
+            Optum Real Prior Authorization (parallel PAS path)
+          </div>
+          {optumPasLoading && !optumPasResult ? (
+            <div className="text-sm">Submitting to Optum&rsquo;s real Claim/$submit endpoint...</div>
+          ) : optumPasResult?.ok ? (
+            (() => {
+              const cr = optumPasResult.json?.response?.entry?.[0]?.resource;
+              return (
+                <>
+                  <div className="font-bold">
+                    {cr?.outcome === 'queued' ? '⏳' : '✓'} {cr?.disposition || cr?.outcome || 'Response received'}
+                  </div>
+                  <div className="text-sm mt-1">
+                    Outcome: <code className="bg-white px-1 rounded">{cr?.outcome || '—'}</code> · Mode:{' '}
+                    <code className="bg-white px-1 rounded">{optumPasResult.json?.mode}</code>
+                  </div>
+                  <div className="text-xs mt-2 text-violet-800 bg-violet-100 px-2 py-1 rounded">
+                    From a real, independent UnitedHealthcare-shaped Da Vinci PAS implementation —
+                    a genuine second opinion on the same Bundle, not just a projection of this
+                    sandbox&rsquo;s own decision.
+                  </div>
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-violet-700">Show request/response JSON</summary>
+                    <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
+                      {JSON.stringify(optumPasResult.json, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              );
+            })()
+          ) : (
+            <div className="text-sm">
+              Optum call failed: {optumPasResult?.json?.error || `HTTP ${optumPasResult?.status}`}
             </div>
           )}
         </div>

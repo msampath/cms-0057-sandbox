@@ -135,6 +135,7 @@ PAS endpoint receives a FHIR Bundle (Patient + Coverage + Practitioner + Claim +
 - `lib/keys.js` — the RS384 keypair, sourced from `SANDBOX_PRIVATE_KEY_B64`. `keysAvailable()`, `getPublicJwk()`, `getKid()`, `signRs384()`, `verifyRs384()`. Read env at call time. Backs both `lib/auth.js` (inbound) and `lib/epicBackend.js` (outbound)
 - `lib/epicBackend.js` — outbound SMART Backend Services client to Epic's public FHIR sandbox. Same four-mode gating shape as `lib/availity.js` (`disabled | mock-forced | mock-no-credentials | live`). `EPIC_BACKEND_CLIENT_ID` + a configured keypair is what flips it to `live`. Mock modes return canned Patient resources for Epic's seven well-known test patients, so the demo works with zero credentials
 - `lib/availity.js` — outbound clearinghouse client, the pattern `lib/epicBackend.js` mirrors
+- `lib/optumBackend.js` — outbound client to Optum's real payer sandbox, same four-mode gating shape. Covers the full CRD order-sign → DTR questionnaire-package → PAS Claim/$submit chain plus Provider Access $bulk-member-match, wired into both `/ehr` and `/um`. `OPTUM_CLIENT_ID` + `OPTUM_CLIENT_SECRET` flips it to `live`. Token endpoint is form-encoded despite Optum's own docs showing JSON; the CDS Hooks invocation path (`crd-order-sign`) does not match the `id` field in Optum's own discovery response — see `docs/integrations.md`
 - `lib/pendedReview.js` — request-driven pended finalization
 - `lib/basePath.js` — `BASE_PATH` and `apiUrl()`
 - `lib/python.js` — `runPython` plus a cached `probePdfExtraction()` behind `app/api/extract/health/`
@@ -190,7 +191,7 @@ No fixed order. Pull from here when picking up a work session.
 
 4. **CMS-0062-P roadmap items** — drug-benefit PA path, drug-specific decision timeframes, simulated endpoint registry, version-pinned profile URLs, Da Vinci CDex attachments. These are described in README.md and should stay there rather than being duplicated here.
 
-Shipped since the list above was last trimmed: asymmetric SMART auth (RS384 + JWKS, `lib/keys.js`), and an outbound SMART Backend Services client to Epic's FHIR sandbox (`lib/epicBackend.js`) — see `docs/integrations.md` for the Epic outcome, which was still being confirmed as of the change that added this note.
+Shipped since the list above was last trimmed: asymmetric SMART auth (RS384 + JWKS, `lib/keys.js`), an outbound SMART Backend Services client to Epic's FHIR sandbox (`lib/epicBackend.js`), and a real payer integration with Optum (`lib/optumBackend.js`) covering the full CRD → DTR → PAS chain plus Provider Access, live and verified — see `docs/integrations.md` for both outcomes.
 
 ## Writing and Documentation Voice
 

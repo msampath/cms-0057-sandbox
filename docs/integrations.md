@@ -14,6 +14,7 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 | [Epic Backend Services](#4a-epic-backend-services-reading-epics-own-test-patients) | EHR-facing (outbound) | Yes | **Yes — live token exchange, real Patient resources read** |
 | [Epic on FHIR, SMART launch](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Registered, OAuth accepts client; live launch limited by Epic sandbox |
 | [Availity](#5-availity-clearinghouse) | Clearinghouse (outbound) | Yes for live mode | Mock mode verified, live mode needs credentials |
+| [Optum](#6-optum-real-payer-api) | Payer-facing (outbound) | Yes | **Yes — live token exchange and all four operations against a real UnitedHealthcare-shaped API** |
 
 ## Setup order, quickest first
 
@@ -24,6 +25,7 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 5. **Availity live mode** — sign up at [developer.availity.com](https://developer.availity.com/partner/gettingstarted), create demo app, set `AVAILITY_CLIENT_ID` and `AVAILITY_CLIENT_SECRET` on Cloud Run. Roughly 30 minutes end to end because of MFA setup and app registration.
 6. **Epic on FHIR, SMART launch** — already registered (see Section 4). No further work unless the app is deleted or Epic changes their sandbox model to expose a self-serve EHR launcher for CMS Prior Auth apps.
 7. **Epic Backend Services** — already registered and live (see Section 4a). Nothing further to do.
+8. **Optum** — already registered and live (see Section 6). Nothing further to do.
 
 ## 1. CDS Hooks Sandbox
 
@@ -184,6 +186,37 @@ Enabling live mode:
    ```
 
 The projection module is at `lib/availity.js` and the outbound endpoint is `app/api/availity/service-review/route.js`. Requests are logged to the UM transaction feed with actor `AVAILITY`.
+
+## 6. Optum real payer API
+
+**Working, live, verified with real data.** Unlike Epic (an EHR vendor's sandbox) and Availity (a clearinghouse), Optum's sandbox is a second, independent **payer's** own implementation of the same CMS-0057-F APIs this sandbox implements. That makes it the closest thing this project has to a real payer-to-payer interoperability proof: the same FHIR Bundle this sandbox's own engine adjudicates is also submitted to a real UnitedHealthcare-shaped Da Vinci PAS implementation, and both results render side by side.
+
+Four operations are wired in, covering the full CRD → DTR → PAS chain plus Provider Access:
+
+| Operation | Where it fires | Endpoint |
+|---|---|---|
+| CRD order-sign | `/ehr`, on every order sign | `POST .../cdsHooksServer/{payerId}/{lob}/api/cds-services/crd-order-sign` |
+| DTR questionnaire package | `/ehr`, on DTR launch (reference panel only, does not drive the actual submission) | `POST .../fhirpa/R4/{payerId}/{lob}/Questionnaire/$questionnaire-package` |
+| PAS submit | `/ehr`, in parallel with this sandbox's own PAS and Availity's Service Review | `POST .../fhirpa/R4/{payerId}/{lob}/Claim/$submit` |
+| Provider Access bulk member-match | `/um` Provider Access tab | `POST .../R4/{payerId}/{lob}/Group/$bulk-member-match` |
+
+`payerId` is `87726` for every operation. `lob` (line of business) differs: `ph` for the three Prior Authorization operations, `bh` for Provider Access.
+
+Mode indicator on each response, same convention as Availity: `live`, `mock-no-credentials`, `mock-forced`, `disabled` (`OPTUM_ENABLED=off`).
+
+**Two real quirks Optum's own documentation got wrong**, found only by empirical testing against the live sandbox:
+
+- **Token endpoint rejects the documented request shape.** Optum's own API Setup page shows a JSON body (`{"client_id":..., "client_secret":..., "grant_type":"client_credentials"}`). The real endpoint returns `400 Missing form parameter: grant_type` against that body. It actually wants `application/x-www-form-urlencoded`, same shape as Epic and Availity's token requests.
+- **CDS Hooks invocation path does not match Optum's own discovery response.** `GET .../api/cds-services` lists the order-sign service with `"id": "coverageRequirements-serviceRequest"`. Appending that id to the discovery URL, the standard CDS Hooks convention this sandbox's own `/api/cds-services/order-sign` follows, returns `400 payerId or lob path param is missing` on every attempt — POST with a real order, POST empty, even a bare GET. The real invocation path is `.../api/cds-services/crd-order-sign`, a literal that does not appear anywhere in the discovery response.
+
+The outbound client is `lib/optumBackend.js`, following the same four-mode gating pattern as `lib/epicBackend.js` and `lib/availity.js`. Routes are `app/api/optum/cds-order-sign/`, `app/api/optum/dtr-questionnaire/`, `app/api/optum/pas-submit/`, and `app/api/optum/provider-member-match/`. Requests are logged to the UM transaction feed with actor `OPTUM`.
+
+Enabling live mode:
+
+```powershell
+gcloud run services update cms-0057-demo --region us-central1 `
+  --update-env-vars OPTUM_CLIENT_ID=<id>,OPTUM_CLIENT_SECRET=<secret>
+```
 
 ## Confirming the sandbox is reachable
 
