@@ -22,10 +22,14 @@ export async function GET(request) {
       'system/ClaimResponse.read'
     ],
     response_types_supported: ['token'],
+    jwks_uri: `${base}/.well-known/jwks.json`,
+    token_endpoint_auth_methods_supported: ['private_key_jwt'],
+    token_endpoint_auth_signing_alg_values_supported: ['RS384'],
     capabilities: [
       'client-confidential-symmetric',
       'permission-v2',
-      'context-standalone-patient'
+      'context-standalone-patient',
+      'client-confidential-asymmetric'
     ]
   });
 }
