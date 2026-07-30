@@ -3,6 +3,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { apiUrl } from '@/lib/basePath';
 import { authedFetch, getDemoToken, decodeJwtPayload } from '@/lib/smartClient';
+import { PATIENT_LIST } from '@/lib/patients';
 
 const NPI_OPTIONS = [
   { npi: '1234567890', label: 'NPI 1234567890 — Ada Smith, MD' },
@@ -23,12 +24,17 @@ export default function ProviderAccessPanel() {
   const [expandedPatient, setExpandedPatient] = useState(null);
   const [optumResult, setOptumResult] = useState(null);
   const [optumLoading, setOptumLoading] = useState(false);
+  const [optumPatientId, setOptumPatientId] = useState(PATIENT_LIST[0].id);
 
   const checkOptum = async () => {
     setOptumResult(null);
     setOptumLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/optum/provider-member-match'), { method: 'POST' });
+      const res = await fetch(apiUrl('/api/optum/provider-member-match'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientId: optumPatientId })
+      });
       const json = await res.json();
       setOptumResult({ ok: res.ok, status: res.status, json });
     } catch (e) {
@@ -86,15 +92,29 @@ export default function ProviderAccessPanel() {
           Optum real Provider Access ($bulk-member-match)
         </div>
         <p className="text-xs text-gray-400 mb-3">
-          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access attribution concept — Optum&apos;s own Da Vinci PDex bulk member-match, alongside this sandbox&apos;s own panel above.
+          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access attribution concept — Optum&apos;s own Da Vinci PDex bulk member-match, alongside this sandbox&apos;s own panel above. Optum&apos;s sandbox holds its own unrelated test members, so a demo patient landing in <span className="font-mono">NonMatchedMembers</span> is the expected, honest outcome — it still proves a real request reached a real payer implementation and got a real verdict back.
         </p>
-        <button
-          onClick={checkOptum}
-          disabled={optumLoading}
-          className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded"
-        >
-          {optumLoading ? 'Querying Optum…' : 'Run $bulk-member-match'}
-        </button>
+        <div className="flex gap-2 flex-wrap items-end mb-3">
+          <div className="flex-1 min-w-56">
+            <label className="text-xs text-gray-400 block mb-1">Demo patient to submit</label>
+            <select
+              value={optumPatientId}
+              onChange={(e) => setOptumPatientId(e.target.value)}
+              className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+            >
+              {PATIENT_LIST.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} — {p.planName} (subscriber {p.subscriberId})</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={checkOptum}
+            disabled={optumLoading}
+            className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded"
+          >
+            {optumLoading ? 'Querying Optum…' : 'Run $bulk-member-match'}
+          </button>
+        </div>
 
         {optumResult && (
           <div className="mt-3">
@@ -102,23 +122,56 @@ export default function ProviderAccessPanel() {
               <>
                 <div className="text-xs text-violet-300 mb-2">
                   mode: <span className="font-mono">{optumResult.json.mode}</span>
+                  {optumResult.json.patient && (
+                    <span className="ml-2">
+                      submitted: <span className="font-semibold text-violet-200">{optumResult.json.patient.name}</span>
+                    </span>
+                  )}
                 </div>
                 {(() => {
                   const params = optumResult.json?.response?.parameter || [];
                   const groups = ['MatchedMembers', 'NonMatchedMembers', 'ConsentConstrainedMembers'];
+                  const patientName = optumResult.json?.patient?.name || '';
+                  const subscriberId = optumResult.json?.patient?.subscriberId || '';
+                  // Match on the full name (not just family name) so a
+                  // coincidental last-name hit against Optum's unrelated
+                  // canned test members (e.g. "John Michael Doe") does not
+                  // read as a false match for "Jane Doe".
+                  const groupInfo = groups.map((name) => {
+                    const group = params.find((p) => p.name === name);
+                    const members = group?.resource?.member || [];
+                    const containsOurPatient = members.some((m) => {
+                      const text = `${m?.entity?.display || ''} ${m?.entity?.reference || ''}`;
+                      return (
+                        (patientName && text.toLowerCase().includes(patientName.toLowerCase())) ||
+                        (subscriberId && text.includes(subscriberId))
+                      );
+                    });
+                    return { name, members, containsOurPatient };
+                  });
+                  const anyMatchFound = groupInfo.some((g) => g.containsOurPatient);
                   return (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {groups.map((name) => {
-                        const group = params.find((p) => p.name === name);
-                        const members = group?.resource?.member || [];
-                        return (
-                          <div key={name} className="bg-gray-900 rounded border border-gray-700 p-2">
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {groupInfo.map(({ name, members, containsOurPatient }) => (
+                          <div
+                            key={name}
+                            className={`bg-gray-900 rounded border p-2 ${containsOurPatient ? 'border-emerald-500 ring-1 ring-emerald-500/50' : 'border-gray-700'}`}
+                          >
                             <div className="text-xs font-semibold text-violet-300 mb-1">{name}</div>
                             <div className="text-xs text-gray-400">{members.length} member{members.length !== 1 ? 's' : ''}</div>
+                            {containsOurPatient && (
+                              <div className="text-xs text-emerald-400 mt-1">{patientName} appears here</div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                        ))}
+                      </div>
+                      {!anyMatchFound && (
+                        <div className="text-xs text-gray-500 mt-2">
+                          {patientName} does not appear in any of Optum&apos;s returned groups — their sandbox test data is unrelated to our demo patients, so an unrecognized identity is the expected outcome, effectively a real <span className="font-mono">NonMatchedMembers</span> verdict for this patient.
+                        </div>
+                      )}
+                    </>
                   );
                 })()}
                 <details className="mt-2">
