@@ -309,13 +309,61 @@ const EPIC_TEST_PATIENTS = [
   { label: 'Olivia Roberts', id: 'eh2xYHuzl9nkSFVvV3osUHg3' }
 ];
 
+function epicPatientDisplayName(patient) {
+  return (
+    [patient?.name?.[0]?.given?.join(' '), patient?.name?.[0]?.family]
+      .filter(Boolean)
+      .join(' ') || null
+  );
+}
+
+// Turns a fetched Epic Patient resource into the same "scenario" shape
+// buildPatientResource/buildCoverageResource/buildPractitionerResource
+// already consume for the four demo patients (see lib/patients.js).
+// Identity (name/DOB/gender/id) is real, pulled from Epic's sandbox. The
+// payer coverage fields are synthesized -- Epic's sandbox has no BCBSIL
+// data -- so this is explicitly a demo blend, not a claim that Epic and
+// BCBSIL are connected.
+function buildEpicScenario(epicResult, fhirId) {
+  const patient = epicResult?.patient;
+  const family = patient?.name?.[0]?.family || 'Patient';
+  const given = patient?.name?.[0]?.given || ['Epic'];
+  const memberSuffix = fhirId.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase();
+  return {
+    id: fhirId,
+    patientId: fhirId,
+    name: epicPatientDisplayName(patient) || 'Epic Sandbox Patient',
+    family,
+    given,
+    dob: patient?.birthDate || '1970-01-01',
+    gender: patient?.gender || 'unknown',
+    planType: 'COMM-PPO',
+    planName: 'Commercial PPO',
+    coverageId: `cov-comm-ppo-bcbsil-epic-${memberSuffix}`,
+    subscriberId: `BCBSIL-MEM-EPIC-${memberSuffix}`,
+    npi: '1234567890',
+    practitioner: { id: 'pract-555-smith', family: 'Smith', given: ['Ada'] },
+    tag: epicResult?.mode === 'live' ? 'Epic Sandbox (live)' : 'Epic Sandbox (mock)',
+    tagColor: 'bg-sky-100 text-sky-800',
+    borderColor: 'border-sky-400',
+    description:
+      'Real Epic FHIR identity via SMART Backend Services. Coverage, member ID, and ordering NPI below are synthesized for this demo.',
+    defaultOrderIndex: 5,
+    presetCode: ''
+  };
+}
+
 // ---- Page ------------------------------------------------------------------
 export default function EhrDashboard() {
   const [scenarioId, setScenarioId] = useState('jane-doe');
-  const scenario = useMemo(
-    () => PATIENT_SCENARIOS.find((s) => s.id === scenarioId),
-    [scenarioId]
-  );
+  // Populated only when the user explicitly opts in from the Epic panel
+  // below (see the "Use ... for the PA order flow" button). Fetching a
+  // preview in that panel does not change this on its own.
+  const [epicScenario, setEpicScenario] = useState(null);
+  const scenario = useMemo(() => {
+    if (scenarioId === 'epic-patient' && epicScenario) return epicScenario;
+    return PATIENT_SCENARIOS.find((s) => s.id === scenarioId);
+  }, [scenarioId, epicScenario]);
   const [selectedIndex, setSelectedIndex] = useState(5); // 70553 MRI Brain (jane-doe default)
   const [planType, setPlanType] = useState('COMM-PPO');
   // Free-text code overrides the preset dropdown when non-empty.
@@ -698,6 +746,23 @@ export default function EhrDashboard() {
               <div className="text-xs text-gray-500 mt-1 leading-snug">{s.description}</div>
             </button>
           ))}
+          {epicScenario && (
+            <button
+              key="epic-patient"
+              onClick={() => setScenarioId('epic-patient')}
+              className={`text-left p-3 rounded-lg border-2 transition-all ${
+                scenarioId === 'epic-patient'
+                  ? `${epicScenario.borderColor} bg-white shadow-md`
+                  : 'border-gray-200 bg-gray-50 hover:bg-white hover:border-gray-300'
+              }`}
+            >
+              <div className="font-semibold text-gray-900 text-sm">{epicScenario.name}</div>
+              <span className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-1 ${epicScenario.tagColor}`}>
+                {epicScenario.tag}
+              </span>
+              <div className="text-xs text-gray-500 mt-1 leading-snug">{epicScenario.description}</div>
+            </button>
+          )}
         </div>
       </div>
 
@@ -709,6 +774,13 @@ export default function EhrDashboard() {
         <div className="text-xs text-gray-500 mb-4 bg-gray-100 p-2 rounded inline-block">
           Patient ({scenario.patientId}) · Coverage ({scenario.coverageId}) · NPI {scenario.npi}
         </div>
+        {scenarioId === 'epic-patient' && (
+          <div className="text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 mb-4">
+            Real Epic FHIR identity. The coverage, member ID, and ordering
+            NPI above are synthesized for this demo — Epic&rsquo;s sandbox
+            has no BCBSIL coverage data.
+          </div>
+        )}
         <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Plan type</div>
         <select
           className="border border-gray-300 p-2 rounded w-full mb-4 text-gray-800"
@@ -1112,11 +1184,7 @@ export default function EhrDashboard() {
         {epicResult?.patient && (
           <div className="text-sm">
             <div>
-              <strong>
-                {[epicResult.patient.name?.[0]?.given?.join(' '), epicResult.patient.name?.[0]?.family]
-                  .filter(Boolean)
-                  .join(' ') || '(no name returned)'}
-              </strong>
+              <strong>{epicPatientDisplayName(epicResult.patient) || '(no name returned)'}</strong>
             </div>
             <div className="text-xs mt-1">
               DOB: <code className="bg-white px-1 rounded">{epicResult.patient.birthDate || '—'}</code>{' '}
@@ -1132,6 +1200,16 @@ export default function EhrDashboard() {
                 ))}
               </div>
             )}
+            <button
+              onClick={() => {
+                setEpicScenario(buildEpicScenario(epicResult, epicPatientId));
+                setScenarioId('epic-patient');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="mt-3 text-sm font-semibold bg-sky-700 text-white px-3 py-1.5 rounded hover:bg-sky-800"
+            >
+              Use {epicPatientDisplayName(epicResult.patient) || 'this patient'} for the PA order flow →
+            </button>
             <details className="mt-2 text-xs">
               <summary className="cursor-pointer text-sky-700">Show signed client assertion claims</summary>
               <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
