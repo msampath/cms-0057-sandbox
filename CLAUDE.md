@@ -90,15 +90,18 @@ Two endpoints together simulate the Da Vinci PDex `$member-match` + history exch
 
 The P2P Exchange tab in `/um` drives both calls sequentially and walks the returned Bundle by `resourceType`.
 
-### SMART demo auth (`lib/auth.js`, `app/api/auth/token/`)
+### SMART demo auth (`lib/auth.js`, `lib/keys.js`, `app/api/auth/token/`)
 
 The three access APIs enforce SMART-style Bearer tokens. Not real OAuth, but the request shape is right.
 
-- `POST /api/auth/token` — `client_credentials` + `scope` → a 300-second HS256 JWT signed with node `crypto`, no new dependencies
-- Discovery at `app/api/.well-known/smart-configuration/`
+- `POST /api/auth/token` — `client_credentials` + `scope` → a 300-second JWT signed with node `crypto`, no new dependencies
+- `authMode()` in `lib/auth.js` picks the algorithm per deployment: **RS384** when `SANDBOX_PRIVATE_KEY_B64` is set (via `lib/keys.js`), else HS256 with a demo shared secret. Read at call time, not cached at module load — do not copy the module-load caching pattern `AUTH_ENABLED` uses.
+- `verifyToken()` parses the JWT header and rejects immediately on an `alg` mismatch against the active mode, before touching the signature. This is the actual defense against algorithm-confusion attacks — do not accept both algorithms at once, and do not remove the header check.
+- Discovery at `app/api/.well-known/smart-configuration/`. Origin is resolved from `x-forwarded-host`/`x-forwarded-proto`, not `request.url` — Cloud Run terminates TLS externally and proxies internally, so `request.url` reflects the container's internal bind address. This bit the `jwks_uri`/`token_endpoint` fields once already; do not revert to `new URL(request.url).origin`.
 - `requireScopes()` returns a 401 OperationOutcome with `WWW-Authenticate` when the token is missing, 403 when scopes are insufficient. The 401 → token → 200 sequence is a demo beat, so do not silently make these routes open
 - `DEMO_AUTH=off` is the kill switch
-- Client side: `lib/smartClient.js` caches a token per scope set and exposes `authedFetch()`
+- Client side: `lib/smartClient.js` caches a token per scope set and exposes `authedFetch()`. Unaffected by the RS384 change — it only ever handles the opaque Bearer string.
+- `lib/keys.js` also backs the outbound side: `lib/epicBackend.js` signs its client assertion to Epic with the same keypair. One JWKS, two consumers.
 
 ### Pended review (`lib/pendedReview.js`)
 
@@ -129,6 +132,9 @@ PAS endpoint receives a FHIR Bundle (Patient + Coverage + Practitioner + Claim +
 - `lib/fhir.js` — PAS profile constants and `wrapPasResponseBundle()`
 - `lib/eob.js` — `buildEob()`, CARIN BB v2.2.0 Professional NonClinician EOBs with three `total[]` slices (submitted, paidtoprovider, memberliability)
 - `lib/auth.js` / `lib/smartClient.js` — server-side scope enforcement and client-side token caching
+- `lib/keys.js` — the RS384 keypair, sourced from `SANDBOX_PRIVATE_KEY_B64`. `keysAvailable()`, `getPublicJwk()`, `getKid()`, `signRs384()`, `verifyRs384()`. Read env at call time. Backs both `lib/auth.js` (inbound) and `lib/epicBackend.js` (outbound)
+- `lib/epicBackend.js` — outbound SMART Backend Services client to Epic's public FHIR sandbox. Same four-mode gating shape as `lib/availity.js` (`disabled | mock-forced | mock-no-credentials | live`). `EPIC_BACKEND_CLIENT_ID` + a configured keypair is what flips it to `live`. Mock modes return canned Patient resources for Epic's seven well-known test patients, so the demo works with zero credentials
+- `lib/availity.js` — outbound clearinghouse client, the pattern `lib/epicBackend.js` mirrors
 - `lib/pendedReview.js` — request-driven pended finalization
 - `lib/basePath.js` — `BASE_PATH` and `apiUrl()`
 - `lib/python.js` — `runPython` plus a cached `probePdfExtraction()` behind `app/api/extract/health/`
@@ -180,11 +186,11 @@ No fixed order. Pull from here when picking up a work session.
 
 2. **Bulk FHIR `$export` for P2P history** — replace the synchronous searchset Bundle with a kick-off returning 202 plus a polling `Content-Location`, a poll endpoint returning an NDJSON manifest, and NDJSON output over the same resources `lib/eob.js` already builds. `p2pExchange.jsx` needs a poll-and-fetch step added to step 3.
 
-3. **Asymmetric SMART (RS256 + JWKS)** — replace the shared HS256 secret in `lib/auth.js` with an RS256 keypair, publish the public key at `GET /api/.well-known/jwks.json`, and advertise `jwks_uri` in the SMART discovery document. `lib/smartClient.js` is unaffected.
+3. **More agentic PDF ingestion** — `scripts/extractPreIngested.py` is pattern and regex based today. An LLM classification and extraction pass over the text pdfplumber already pulls, with the regex path as a confidence-gated fallback, feeding the same staged-rules shape `app/api/extract/route.js` expects.
 
-4. **More agentic PDF ingestion** — `scripts/extractPreIngested.py` is pattern and regex based today. An LLM classification and extraction pass over the text pdfplumber already pulls, with the regex path as a confidence-gated fallback, feeding the same staged-rules shape `app/api/extract/route.js` expects.
+4. **CMS-0062-P roadmap items** — drug-benefit PA path, drug-specific decision timeframes, simulated endpoint registry, version-pinned profile URLs, Da Vinci CDex attachments. These are described in README.md and should stay there rather than being duplicated here.
 
-5. **CMS-0062-P roadmap items** — drug-benefit PA path, drug-specific decision timeframes, simulated endpoint registry, version-pinned profile URLs, Da Vinci CDex attachments. These are described in README.md and should stay there rather than being duplicated here.
+Shipped since the list above was last trimmed: asymmetric SMART auth (RS384 + JWKS, `lib/keys.js`), and an outbound SMART Backend Services client to Epic's FHIR sandbox (`lib/epicBackend.js`) — see `docs/integrations.md` for the Epic outcome, which was still being confirmed as of the change that added this note.
 
 ## Writing and Documentation Voice
 

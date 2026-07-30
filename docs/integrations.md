@@ -71,6 +71,22 @@ Under the hood:
 
 Public client, PKCE, no secret. Same shape works against any conformant SMART v2 EHR sandbox including Epic.
 
+## 4a. Epic Backend Services (reading Epic's own test patients)
+
+Separate from the SMART launch work in Section 4 below, the sandbox is also an **outbound** SMART Backend Services client to Epic: it signs a `client-confidential-asymmetric` JWT assertion with its own RS384 keypair (the same one behind `/api/.well-known/jwks.json`) and exchanges it for a token at Epic's `client_credentials` endpoint, then reads a `Patient` resource. This is the path Epic's own Developer Testing Guide documents for backend apps connecting to the sandbox, and it is the only path that has a real chance of returning actual data for Epic's well-known test patients (Camila Lopez, Derrick Lin, Warren McGinnis, and four others) — the standalone/EHR-launch paths tested in Section 4 do not grant resource scopes to third-party apps in the public sandbox, confirmed empirically in an earlier session.
+
+**Registration**: a third Epic app, Backend Systems audience, General use case, Non-Production JWK Set URL pointed at `https://surakshith.com/cms-0057/api/.well-known/jwks.json`, Incoming APIs `Patient.Read` and `Coverage.Read`. Non-production client id set as `EPIC_BACKEND_CLIENT_ID` on Cloud Run.
+
+**Verified working, independent of Epic's response**:
+- The JWT assertion is built correctly per spec: header `{alg: 'RS384', typ: 'JWT', kid}`, claims `iss = sub = client_id`, `aud = token endpoint`, `jti` nonce, `exp` under 5 minutes
+- The JWKS endpoint is publicly reachable, returns clean JSON with no proxy/WAF interference, confirmed with multiple user agents
+- The client id is stored correctly on Cloud Run, byte for byte
+- The UI panel on `/ehr` renders the live call, the mode badge, and a clean error state with no crash when Epic rejects the request
+
+**Current status calling Epic live**: Epic's token endpoint returns `400 invalid_client` on every attempt so far. This is the error a client_credentials server returns when it does not yet recognize the client id / JWKS registration at all — distinct from a scope-grant rejection (which would show up later, as a 403 on the resource read, after a token was successfully issued). Epic's own docs state registration changes can take up to 30 minutes to sync to the sandbox; that is the leading explanation, not yet confirmed. If it turns out to be a permanent restriction rather than a sync delay, that will be recorded here plainly, the same way the standalone-launch limitation is recorded in Section 4.
+
+**Try it**: `curl https://surakshith.com/cms-0057/api/epic/patient?id=erXuFYUfucBZaryVksYEcMg3` — or the panel on `/ehr`. Without `EPIC_BACKEND_CLIENT_ID` configured, or before Epic's registration syncs, it returns a canned Patient resource (`mode: mock-no-credentials`) so the demo stays usable regardless of Epic's state.
+
 ## 4. Epic on FHIR
 
 Two Epic app registrations exist under the developer account `msampath`:

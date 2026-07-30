@@ -88,9 +88,13 @@ The sandbox plugs into public health-IT test tools without special configuration
 - SMART App Launcher → `/ehr` as a launched SMART app (public-client PKCE, verified end to end)
 - Availity clearinghouse → parallel X12 278 submission alongside the FHIR PAS path (mock mode by default, credentials optional)
 - Inferno by ONC → the four FHIR APIs for conformance testing
-- Epic on FHIR sandbox → same SMART launch flow, subject to Epic client registration
+- Epic on FHIR sandbox → SMART on FHIR launch (working), plus a Backend Services client reading Epic's own test patients via an RS384-signed assertion against a published JWKS (registered, real token exchange attempted, outcome documented honestly)
 
-Setup for each is in [docs/integrations.md](docs/integrations.md).
+Setup and current status for each is in [docs/integrations.md](docs/integrations.md).
+
+## Asymmetric SMART auth
+
+This sandbox's own token endpoint signs with RS384 and publishes its public key at `/api/.well-known/jwks.json` when a keypair is configured (`SANDBOX_PRIVATE_KEY_B64`), falling back to a demo HS256 secret when it is not — either way the 401 → token → 200 mechanics are the same. The same keypair signs the client assertion this sandbox sends as an outbound SMART Backend Services client to Epic's FHIR sandbox. See [docs/conformance.md](docs/conformance.md) for what that unlocks and [docs/integrations.md](docs/integrations.md) for the Epic outcome.
 
 ## How this was built
 
@@ -115,7 +119,6 @@ CMS proposed a follow-on rule, [CMS-0062-P](https://www.federalregister.gov/docu
 - **Da Vinci CDex attachments** — structured attachment exchange in place of the plain file upload the DTR pane accepts now
 - **Transaction log persistence** — carried over from before this conformance pass; the log, pending map, and committed rules reset on restart today
 - **Bulk FHIR `$export`** — for the Payer-to-Payer history endpoint, in place of the synchronous searchset Bundle
-- **Asymmetric SMART auth** — RS256 plus a JWKS endpoint, in place of the shared HS256 demo secret
 - **More agentic PDF ingestion** — an LLM classification pass over the text the parser already pulls, with the current pattern-matching extractor as a confidence-gated fallback
 
 ## License

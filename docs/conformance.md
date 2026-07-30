@@ -8,10 +8,12 @@ Implemented against the specifications:
 - `$member-match` accepting and returning pure Parameters per the HRex operation, with no convenience fields outside the spec shape
 - a FHIR CapabilityStatement at `GET /api/fhir/metadata` declaring the resources, operations, and implementation guides
 - SMART-style token issuance and enforcement: `client_credentials` grants, scoped patient/system tokens, 401 with `WWW-Authenticate` on missing tokens, 403 naming missing scopes
+- asymmetric signing per the SMART `client-confidential-asymmetric` profile: RS384 (not RS256, which the profile does not permit), a `kid`-bearing JWK published at `GET /api/.well-known/jwks.json`, `jwks_uri` and `token_endpoint_auth_signing_alg_values_supported` advertised in the SMART discovery document. The same keypair signs this sandbox's own tokens and the client assertion this sandbox sends as an outbound Backend Services client to Epic's FHIR sandbox (`lib/epicBackend.js`), so a verifier only fetches one JWKS URL either way
+- the verifier pins the algorithm to whatever mode is active and rejects a token signed with the other algorithm before checking the signature, closing the alg-confusion class of attack rather than accepting either
 
 Simulated, by design and labeled in the UI:
 
-- authentication uses short-lived HS256 demo JWTs with a shared secret. Production SMART v2 backend services would use registered clients, signed client assertions, and asymmetric keys published through JWKS
+- when no keypair is configured (`SANDBOX_PRIVATE_KEY_B64` unset), token issuance falls back to short-lived HS256 demo JWTs with a shared secret, so the demo stays usable without provisioning a key
 - CQL is not executed. DTR pre-population values are hardcoded to match what each library's `define` block would compute for the seed patient
 - the X12 278 is illustrative rather than TR3 005010X217 conformant, and receiver IDs are realistic-looking placeholders
 - the clinical review on pended requests is a timed simulation finalized on poll. Production would run a durable queue and a worker delivering real rest-hook notifications
