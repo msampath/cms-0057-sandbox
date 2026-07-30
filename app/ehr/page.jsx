@@ -297,6 +297,18 @@ function extractPasResponse(json) {
   return { claimResponse: null, task: null };
 }
 
+// Epic's well-known public FHIR sandbox test patients, for the Epic Backend
+// Services panel below.
+const EPIC_TEST_PATIENTS = [
+  { label: 'Camila Lopez', id: 'erXuFYUfucBZaryVksYEcMg3' },
+  { label: 'Derrick Lin', id: 'eq081-VQEgP8drUUqCWzHfw3' },
+  { label: 'Warren McGinnis', id: 'e0w0LEDCYtfckT6N.CkJKCw3' },
+  { label: 'Desiree Powell', id: 'eAB3mDIBBcyUKviyzrxsnAw3' },
+  { label: 'Elijah Davis', id: 'egqBHVfQlt4Bw3XGXoxVxHg3' },
+  { label: 'Linda Ross', id: 'eIXesllypH3M9tAA5WdJftQ3' },
+  { label: 'Olivia Roberts', id: 'eh2xYHuzl9nkSFVvV3osUHg3' }
+];
+
 // ---- Page ------------------------------------------------------------------
 export default function EhrDashboard() {
   const [scenarioId, setScenarioId] = useState('jane-doe');
@@ -322,6 +334,10 @@ export default function EhrDashboard() {
   const [launchedPatient, setLaunchedPatient] = useState(null);
   const [availityResult, setAvailityResult] = useState(null);
   const [availityLoading, setAvailityLoading] = useState(false);
+  const [epicPatientId, setEpicPatientId] = useState(EPIC_TEST_PATIENTS[0].id);
+  const [epicResult, setEpicResult] = useState(null);
+  const [epicError, setEpicError] = useState(null);
+  const [epicLoading, setEpicLoading] = useState(false);
 
   useEffect(() => {
     const session = getLaunchedSession();
@@ -548,6 +564,25 @@ export default function EhrDashboard() {
     setAvailityLoading(false);
     setShowDtr(false);
     setLoading(false);
+  };
+
+  // ---- Epic Backend Services: read a test patient from Epic's sandbox ---
+  const fetchEpicTestPatient = async () => {
+    setEpicResult(null);
+    setEpicError(null);
+    setEpicLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/epic/patient?id=${encodeURIComponent(epicPatientId)}`));
+      const data = await res.json();
+      if (!res.ok) {
+        setEpicError(data?.error || `HTTP ${res.status}`);
+      } else {
+        setEpicResult(data);
+      }
+    } catch (e) {
+      setEpicError(e.message);
+    }
+    setEpicLoading(false);
   };
 
   const indicator = card?.indicator || 'info';
@@ -1032,6 +1067,82 @@ export default function EhrDashboard() {
           )}
         </div>
       )}
+
+      {/* Epic Backend Services panel ----------------------------------- */}
+      <div className="bg-sky-50 border-2 border-sky-600 text-sky-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
+        <div className="text-xs uppercase tracking-widest text-sky-700 mb-1">
+          Epic Backend Services (SMART client-confidential-asymmetric)
+        </div>
+        <p className="text-sm text-sky-800 mb-3">
+          In production, DTR pre-population pulls clinical context from the
+          provider&rsquo;s EHR. This panel performs that call for real against
+          Epic&rsquo;s public FHIR sandbox, using SMART Backend Services
+          (RS384-signed client assertion, published JWKS).
+        </p>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <select
+            value={epicPatientId}
+            onChange={(e) => setEpicPatientId(e.target.value)}
+            className="text-sm border border-sky-300 rounded px-2 py-1.5 bg-white"
+          >
+            {EPIC_TEST_PATIENTS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={fetchEpicTestPatient}
+            disabled={epicLoading}
+            className="text-sm font-semibold bg-sky-600 text-white px-3 py-1.5 rounded hover:bg-sky-700 disabled:opacity-50"
+          >
+            {epicLoading ? 'Fetching…' : 'Fetch from Epic sandbox'}
+          </button>
+          {epicResult?.mode && (
+            <span className="text-xs font-mono px-2 py-1 rounded bg-sky-100 text-sky-800 border border-sky-200">
+              mode: {epicResult.mode}
+            </span>
+          )}
+        </div>
+
+        {epicError && (
+          <div className="text-sm text-red-700">Epic call failed: {epicError}</div>
+        )}
+
+        {epicResult?.patient && (
+          <div className="text-sm">
+            <div>
+              <strong>
+                {[epicResult.patient.name?.[0]?.given?.join(' '), epicResult.patient.name?.[0]?.family]
+                  .filter(Boolean)
+                  .join(' ') || '(no name returned)'}
+              </strong>
+            </div>
+            <div className="text-xs mt-1">
+              DOB: <code className="bg-white px-1 rounded">{epicResult.patient.birthDate || '—'}</code>{' '}
+              · Gender: <code className="bg-white px-1 rounded">{epicResult.patient.gender || '—'}</code>
+            </div>
+            {(epicResult.patient.identifier || []).length > 0 && (
+              <div className="text-xs mt-1">
+                Identifiers:{' '}
+                {epicResult.patient.identifier.map((id, i) => (
+                  <code key={i} className="bg-white px-1 rounded mr-1">
+                    {id.value}
+                  </code>
+                ))}
+              </div>
+            )}
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-sky-700">Show signed client assertion claims</summary>
+              <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
+                {epicResult.assertionClaims
+                  ? JSON.stringify(epicResult.assertionClaims, null, 2)
+                  : 'No assertion sent — mock mode does not call Epic.'}
+              </pre>
+            </details>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
