@@ -679,17 +679,23 @@ export default function EhrDashboard() {
   };
 
   // ---- Epic Backend Services: read a test patient from Epic's sandbox ---
-  const fetchEpicTestPatient = async () => {
+  // Called directly from a Patient scenarios card click: fetches the real
+  // Epic identity and, on success, activates it as the current scenario in
+  // one step (no separate "use this patient" click needed).
+  const fetchEpicTestPatient = async (id) => {
+    setEpicPatientId(id);
     setEpicResult(null);
     setEpicError(null);
     setEpicLoading(true);
     try {
-      const res = await fetch(apiUrl(`/api/epic/patient?id=${encodeURIComponent(epicPatientId)}`));
+      const res = await fetch(apiUrl(`/api/epic/patient?id=${encodeURIComponent(id)}`));
       const data = await res.json();
       if (!res.ok) {
         setEpicError(data?.error || `HTTP ${res.status}`);
       } else {
         setEpicResult(data);
+        setEpicScenario(buildEpicScenario(data, id));
+        setScenarioId('epic-patient');
       }
     } catch (e) {
       setEpicError(e.message);
@@ -707,47 +713,42 @@ export default function EhrDashboard() {
         Provider EHR Workspace
       </h1>
 
-      {/* ---- SMART launch: standalone-launch CTA when no session active */}
+      {/* ---- SMART launch: EHR launch CTA when no session active -------- */}
       {!launchedSession && (
         <div className="mb-6 max-w-3xl bg-slate-50 border border-slate-300 rounded-lg p-4 text-sm">
           <div className="text-xs uppercase tracking-widest text-slate-500 mb-1">
-            SMART on FHIR
+            SMART on FHIR — EHR launch
           </div>
           <div className="text-slate-800 mb-2">
-            Launch this app against an external FHIR sandbox to pull a real
-            patient into the workspace instead of the demo scenarios below.
-          </div>
-          <div className="flex gap-3 flex-wrap">
-            <a
-              href={`${BASE_PATH}/ehr/standalone`}
-              className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900"
-            >
-              Standalone launch → Epic sandbox
-            </a>
+            Launch this app the way a real EHR would, from the reference{' '}
             <a
               href="https://launch.smarthealthit.org"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs px-3 py-1.5 rounded bg-slate-200 text-slate-800 hover:bg-slate-300"
+              className="underline font-semibold"
             >
-              EHR launch → SMART App Launcher (external)
-            </a>
-          </div>
-          <div className="text-xs text-slate-500 mt-2">
-            Epic sandbox test users: <code>FHIRTWO</code> / <code>EpicFhir11!</code>
-            (provider with PractitionerRole) or <code>FHIR</code> / <code>EpicFhir11!</code> (provider without).
-            SMART App Launcher accepts any practitioner and any test patient.
-            Launched data is displayed for the current session only, never persisted.
-          </div>
-          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded px-3 py-2 mt-2">
-            Expect &ldquo;Invalid OAuth 2.0 request.&rdquo; on Epic&rsquo;s login page after Standalone launch.
-            That is Epic&rsquo;s public sandbox policy, not a bug here: it strips resource scopes from
-            third-party developer apps on this interactive path, confirmed across both app
-            registrations and every use case tried. For real Epic patient data, see the{' '}
-            <a href="#epic-backend-services" className="underline font-semibold">
-              Epic Backend Services panel
+              SMART App Launcher
             </a>{' '}
-            below, which authenticates with a signed JWT assertion instead and does get real reads.
+            — the same open-source launcher Epic and Cerner test against.
+          </div>
+          <ol className="list-decimal list-inside text-slate-700 space-y-1 mb-3">
+            <li>Click <strong>Open SMART App Launcher</strong> below — this app&rsquo;s launch URL is already filled in, nothing to type</li>
+            <li>Pick any provider and any patient on the launcher&rsquo;s own screens</li>
+            <li>Click <strong>Launch</strong></li>
+          </ol>
+          <a
+            href="https://launch.smarthealthit.org/?launch_url=https%3A%2F%2Fsurakshith.com%2Fcms-0057%2Fehr%2Flaunch"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900"
+          >
+            Open SMART App Launcher →
+          </a>
+          <div className="text-xs text-slate-500 mt-2">
+            This page reopens with a banner naming the launched patient. Launched data is
+            displayed for the current session only, never persisted. For real Epic sandbox
+            identities via SMART Backend Services instead, click any Epic patient in the
+            scenarios below.
           </div>
         </div>
       )}
@@ -820,23 +821,40 @@ export default function EhrDashboard() {
               <div className="text-xs text-gray-500 mt-1 leading-snug">{s.description}</div>
             </button>
           ))}
-          {epicScenario && (
-            <button
-              key="epic-patient"
-              onClick={() => setScenarioId('epic-patient')}
-              className={`text-left p-3 rounded-lg border-2 transition-all ${
-                scenarioId === 'epic-patient'
-                  ? `${epicScenario.borderColor} bg-white shadow-md`
-                  : 'border-gray-200 bg-gray-50 hover:bg-white hover:border-gray-300'
-              }`}
-            >
-              <div className="font-semibold text-gray-900 text-sm">{epicScenario.name}</div>
-              <span className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-1 ${epicScenario.tagColor}`}>
-                {epicScenario.tag}
-              </span>
-              <div className="text-xs text-gray-500 mt-1 leading-snug">{epicScenario.description}</div>
-            </button>
-          )}
+        </div>
+
+        <div className="text-xs uppercase tracking-wide text-gray-500 mt-4 mb-2">
+          Epic sandbox (real FHIR reads via SMART Backend Services)
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {EPIC_TEST_PATIENTS.map((p) => {
+            const isActive = scenarioId === 'epic-patient' && epicPatientId === p.id;
+            const isFetching = epicLoading && epicPatientId === p.id;
+            return (
+              <button
+                key={p.id}
+                onClick={() => fetchEpicTestPatient(p.id)}
+                disabled={epicLoading}
+                className={`text-left p-3 rounded-lg border-2 transition-all disabled:opacity-60 ${
+                  isActive
+                    ? 'border-sky-400 bg-white shadow-md'
+                    : 'border-gray-200 bg-gray-50 hover:bg-white hover:border-gray-300'
+                }`}
+              >
+                <div className="font-semibold text-gray-900 text-sm">{p.label}</div>
+                <span className="inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-1 bg-sky-100 text-sky-800">
+                  Epic Sandbox
+                </span>
+                <div className="text-xs text-gray-500 mt-1 leading-snug">
+                  {isFetching
+                    ? 'Fetching real identity from Epic…'
+                    : isActive
+                      ? 'Active — real Epic FHIR identity'
+                      : 'Click to fetch real identity'}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1372,44 +1390,30 @@ export default function EhrDashboard() {
         </div>
         <p className="text-sm text-sky-800 mb-3">
           In production, DTR pre-population pulls clinical context from the
-          provider&rsquo;s EHR. This panel performs that call for real against
-          Epic&rsquo;s public FHIR sandbox, using SMART Backend Services
-          (RS384-signed client assertion, published JWKS).
+          provider&rsquo;s EHR. Clicking a name under &ldquo;Epic sandbox&rdquo; above
+          performs that call for real against Epic&rsquo;s public FHIR sandbox, using
+          SMART Backend Services (RS384-signed client assertion, published JWKS).
         </p>
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <select
-            value={epicPatientId}
-            onChange={(e) => setEpicPatientId(e.target.value)}
-            className="text-sm border border-sky-300 rounded px-2 py-1.5 bg-white"
-          >
-            {EPIC_TEST_PATIENTS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={fetchEpicTestPatient}
-            disabled={epicLoading}
-            className="text-sm font-semibold bg-sky-600 text-white px-3 py-1.5 rounded hover:bg-sky-700 disabled:opacity-50"
-          >
-            {epicLoading ? 'Fetching…' : 'Fetch from Epic sandbox'}
-          </button>
-          {epicResult?.mode && (
-            <span className="text-xs font-mono px-2 py-1 rounded bg-sky-100 text-sky-800 border border-sky-200">
-              mode: {epicResult.mode}
-            </span>
-          )}
-        </div>
 
         {epicError && (
           <div className="text-sm text-red-700">Epic call failed: {epicError}</div>
         )}
 
+        {!epicError && !epicResult && (
+          <div className="text-sm text-sky-700">
+            Click an Epic sandbox patient above to fetch their real record here.
+          </div>
+        )}
+
         {epicResult?.patient && (
           <div className="text-sm">
-            <div>
+            <div className="flex items-center gap-2">
               <strong>{epicPatientDisplayName(epicResult.patient) || '(no name returned)'}</strong>
+              {epicResult.mode && (
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-200">
+                  mode: {epicResult.mode}
+                </span>
+              )}
             </div>
             <div className="text-xs mt-1">
               DOB: <code className="bg-white px-1 rounded">{epicResult.patient.birthDate || '—'}</code>{' '}
@@ -1425,16 +1429,6 @@ export default function EhrDashboard() {
                 ))}
               </div>
             )}
-            <button
-              onClick={() => {
-                setEpicScenario(buildEpicScenario(epicResult, epicPatientId));
-                setScenarioId('epic-patient');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="mt-3 text-sm font-semibold bg-sky-700 text-white px-3 py-1.5 rounded hover:bg-sky-800"
-            >
-              Use {epicPatientDisplayName(epicResult.patient) || 'this patient'} for the PA order flow →
-            </button>
             <details className="mt-2 text-xs">
               <summary className="cursor-pointer text-sky-700">Show signed client assertion claims</summary>
               <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
