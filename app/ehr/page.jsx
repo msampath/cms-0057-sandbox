@@ -734,10 +734,14 @@ export default function EhrDashboard() {
           <ol className="list-decimal list-inside text-slate-700 space-y-1 mb-3">
             <li>Click <strong>Open SMART App Launcher</strong> below — this app&rsquo;s launch URL is already filled in, nothing to type</li>
             <li>Pick any provider and any patient on the launcher&rsquo;s own screens</li>
-            <li>Click <strong>Launch</strong></li>
+            <li>
+              Click <strong>Launch</strong> — this app loads embedded inside the launcher&rsquo;s
+              page (its &ldquo;simulate launch within the EHR UI&rdquo; mode), the way a real EHR
+              would iframe a launched app rather than navigating away
+            </li>
           </ol>
           <a
-            href="https://launch.smarthealthit.org/?launch_url=https%3A%2F%2Fsurakshith.com%2Fcms-0057%2Fehr%2Flaunch"
+            href="https://launch.smarthealthit.org/?launch_url=https%3A%2F%2Fsurakshith.com%2Fcms-0057%2Fehr%2Flaunch&launch=WzAsIiIsIiIsIkFVVE8iLDAsMCwxLCIiLCIiLCIiLCIiLCIiLCIiLCIiLDAsMSwiIl0"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900"
@@ -745,7 +749,7 @@ export default function EhrDashboard() {
             Open SMART App Launcher →
           </a>
           <div className="text-xs text-slate-500 mt-2">
-            This page reopens with a banner naming the launched patient. Launched data is
+            The embedded app shows a banner naming the launched patient. Launched data is
             displayed for the current session only, never persisted. For real Epic sandbox
             identities via SMART Backend Services instead, click any Epic patient in the
             scenarios below.
