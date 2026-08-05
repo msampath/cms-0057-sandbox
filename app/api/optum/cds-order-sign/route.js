@@ -10,9 +10,9 @@ export const dynamic = 'force-dynamic';
  * POST /api/optum/cds-order-sign
  * Body: { patientId, practitionerId, code, display }
  *
- * A third, independent CRD opinion on the same order this sandbox's own
- * engine and Availity's X12 278 path evaluate -- this one from a real
- * UnitedHealthcare-shaped Da Vinci CRD implementation.
+ * A second, independent CRD opinion on the same order this sandbox's
+ * own engine evaluates -- this one from a real UnitedHealthcare-shaped
+ * Da Vinci CRD implementation.
  */
 export async function POST(request) {
   let body;

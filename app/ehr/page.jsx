@@ -436,6 +436,7 @@ export default function EhrDashboard() {
     setOptumOrderSign(null);
     setOptumQuestionnaire(null);
     setOptumPasResult(null);
+    setAvailityResult(null);
   }, [scenarioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll for pended PA determination every 2 seconds until finalized.
@@ -483,6 +484,7 @@ export default function EhrDashboard() {
     setAnswers({});
     setSmartContext(null);
     setOptumOrderSign(null);
+    setAvailityResult(null);
     setLoading(true);
 
     const patient = buildPatientResource(scenario, order.conditions);
@@ -531,6 +533,20 @@ export default function EhrDashboard() {
         .then((result) => setOptumOrderSign(result))
         .catch((err) => setOptumOrderSign({ ok: false, json: { error: err.message } }))
         .finally(() => setOptumOrderSignLoading(false));
+
+      // Availity Coverages: verify the patient has active eligibility at
+      // the payer via a real clearinghouse call (X12 270/271). Fires
+      // alongside the CRD hook, non-blocking.
+      setAvailityLoading(true);
+      fetch(apiUrl('/api/availity/coverage-check'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientId: patient.id })
+      })
+        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+        .then((result) => setAvailityResult(result))
+        .catch((err) => setAvailityResult({ ok: false, json: { error: err.message } }))
+        .finally(() => setAvailityLoading(false));
     }
   };
 
@@ -626,27 +642,19 @@ export default function EhrDashboard() {
     };
 
     setWasPended(false);
-    setAvailityResult(null);
-    setAvailityLoading(true);
     setOptumPasResult(null);
     setOptumPasLoading(true);
 
-    // Three parallel paths for the same PAS Bundle: FHIR PAS to this
-    // sandbox's own payer engine (per CMS-0057-F), X12 278 in JSON to the
-    // Availity clearinghouse (the legacy channel), and Claim/$submit to
+    // Two parallel PAS paths for the same Bundle: FHIR PAS to this
+    // sandbox's own payer engine (per CMS-0057-F), and Claim/$submit to
     // Optum's real, independent implementation of the same Da Vinci PAS
-    // operation.
-    const [pasResult, availityResp, optumResp] = await Promise.allSettled([
+    // operation. The Availity clearinghouse call is a pre-order
+    // eligibility check now, fired earlier in signOrder() -- see there.
+    const [pasResult, optumResp] = await Promise.allSettled([
       fetch(apiUrl('/api/pas/submit'), {
         method: 'POST',
         body: JSON.stringify(bundle)
       }).then((r) => r.json()),
-      fetch(apiUrl('/api/availity/service-review'), {
-        method: 'POST',
-        body: JSON.stringify(bundle)
-      })
-        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .catch((e) => ({ ok: false, status: 0, json: { error: e.message } })),
       fetch(apiUrl('/api/optum/pas-submit'), {
         method: 'POST',
         body: JSON.stringify(bundle)
@@ -666,13 +674,9 @@ export default function EhrDashboard() {
         setSystemAction(task || systemAction);
       }
     }
-    if (availityResp.status === 'fulfilled') {
-      setAvailityResult(availityResp.value);
-    }
     if (optumResp.status === 'fulfilled') {
       setOptumPasResult(optumResp.value);
     }
-    setAvailityLoading(false);
     setOptumPasLoading(false);
     setShowDtr(false);
     setLoading(false);
@@ -1099,6 +1103,59 @@ export default function EhrDashboard() {
         </div>
       )}
 
+      {/* ---- Availity coverage check (X12 270/271 eligibility) ---------- */}
+      {(availityLoading || availityResult) && (
+        <div className="bg-sky-50 border-2 border-sky-600 text-sky-900 px-6 py-4 rounded-lg shadow-sm mb-6 max-w-3xl">
+          <div className="text-xs uppercase tracking-widest text-sky-700 mb-1">
+            Availity coverage check (X12 270/271 eligibility)
+          </div>
+          {availityLoading && !availityResult ? (
+            <div className="text-sm">Checking eligibility with Availity&hellip;</div>
+          ) : availityResult?.ok ? (
+            (() => {
+              const first = availityResult.json?.response?.coverages?.[0];
+              const plan = first?.plans?.[0];
+              const active = /active/i.test(plan?.status || '');
+              return (
+                <>
+                  <div className="font-bold">
+                    {active ? '✓' : '⚠'} {plan?.status || first?.status || 'Response received'}
+                  </div>
+                  <div className="text-sm mt-1">
+                    Payer:{' '}
+                    <code className="bg-white px-1 rounded">
+                      {first?.payer?.name || first?.payer?.payerId || '—'}
+                    </code>{' '}
+                    · Member:{' '}
+                    <code className="bg-white px-1 rounded">
+                      {first?.subscriber?.memberId || '—'}
+                    </code>{' '}
+                    · Mode:{' '}
+                    <code className="bg-white px-1 rounded">{availityResult.json?.mode}</code>
+                  </div>
+                  {availityResult.json?.response?._mock && (
+                    <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
+                      Mock response. Set AVAILITY_CLIENT_ID and AVAILITY_CLIENT_SECRET on
+                      Cloud Run to route to the real Availity Coverages API.
+                    </div>
+                  )}
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-sky-700">Show request/response JSON</summary>
+                    <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
+                      {JSON.stringify(availityResult.json, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              );
+            })()
+          ) : (
+            <div className="text-sm">
+              Availity call failed: {availityResult?.json?.error || `HTTP ${availityResult?.status}`}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ---- Persisted coverage-information Task (Da Vinci CRD) -------- */}
       {systemAction && (
         <details className="bg-white border border-gray-200 rounded-lg max-w-3xl mb-6 shadow-sm">
@@ -1275,71 +1332,6 @@ export default function EhrDashboard() {
           {wasPended && (
             <div className="text-xs mt-2 text-green-700 bg-green-100 px-2 py-1 rounded font-mono">
               Received via rest-hook notification — pended request finalized after clinical review.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Availity clearinghouse parallel path ------------------------------ */}
-      {(availityLoading || availityResult) && (
-        <div className="bg-sky-50 border-2 border-sky-600 text-sky-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
-          <div className="text-xs uppercase tracking-widest text-sky-700 mb-1">
-            Availity clearinghouse (parallel X12 278 path)
-          </div>
-          {availityLoading && !availityResult ? (
-            <div className="text-sm">Submitting to Availity Service Reviews...</div>
-          ) : availityResult?.ok ? (
-            <>
-              {availityResult.json?.response?.pending ? (
-                <div className="font-bold flex items-center gap-2">
-                  <span className="inline-block w-3.5 h-3.5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                  Still processing at Availity — no determination yet
-                </div>
-              ) : (
-                <div className="font-bold">
-                  ✓ {availityResult.json?.response?.status || 'Response received'}
-                </div>
-              )}
-              <div className="text-sm mt-1">
-                {availityResult.json?.response?.certificationNumber && (
-                  <>
-                    Cert #:{' '}
-                    <code className="bg-white px-1 rounded">
-                      {availityResult.json.response.certificationNumber}
-                    </code>{' '}
-                    ·{' '}
-                  </>
-                )}
-                Control #:{' '}
-                <code className="bg-white px-1 rounded">
-                  {availityResult.json?.response?.controlNumber || availityResult.json?.response?.id || '—'}
-                </code>{' '}
-                · Mode:{' '}
-                <code className="bg-white px-1 rounded">{availityResult.json?.mode}</code>
-              </div>
-              {availityResult.json?.response?.pending && (
-                <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
-                  Availity returned this asynchronously (202 Accepted) and has not
-                  finished checking with the payer within the poll window. A real
-                  client would keep polling <code>{availityResult.json.response.pollUrl}</code>.
-                </div>
-              )}
-              {availityResult.json?.response?._mock && (
-                <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
-                  Mock response. Set AVAILITY_CLIENT_ID and AVAILITY_CLIENT_SECRET on
-                  Cloud Run to route to the real Availity API.
-                </div>
-              )}
-              <details className="mt-2 text-xs">
-                <summary className="cursor-pointer text-sky-700">Show request/response JSON</summary>
-                <pre className="bg-white p-2 rounded mt-1 overflow-x-auto text-[10px]">
-                  {JSON.stringify(availityResult.json, null, 2)}
-                </pre>
-              </details>
-            </>
-          ) : (
-            <div className="text-sm">
-              Availity call failed: {availityResult?.json?.error || `HTTP ${availityResult?.status}`}
             </div>
           )}
         </div>

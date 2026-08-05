@@ -13,7 +13,7 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 | [SMART App Launcher](#3-smart-app-launcher) | EHR-facing (inbound) | No | Yes, provider-EHR launch |
 | [Epic Backend Services](#4a-epic-backend-services-reading-epics-own-test-patients) | EHR-facing (outbound) | Yes | **Yes — live token exchange, real Patient resources read** |
 | [Epic on FHIR, SMART launch](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Registered, OAuth accepts client; live launch limited by Epic sandbox |
-| [Availity](#5-availity-clearinghouse) | Clearinghouse (outbound) | Yes for live mode | Mock mode verified, live mode needs credentials |
+| [Availity Coverages](#5-availity-coverages-eligibility-clearinghouse) | Clearinghouse (outbound) | Yes | **Yes — live X12 270/271 eligibility calls against Availity's real sandbox** |
 | [Optum](#6-optum-real-payer-api) | Payer-facing (outbound) | Yes | **Yes — live token exchange and all four operations against a real UnitedHealthcare-shaped API** |
 
 ## Setup order, quickest first
@@ -21,11 +21,10 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 1. **CDS Hooks Sandbox** — no signup. Paste `https://surakshith.com/cms-0057/api/cds-services` into their Services config. Done in about a minute.
 2. **SMART App Launcher** — no signup. Paste `https://surakshith.com/cms-0057/ehr/launch` into the App Launch URL field and click Launch. Done in about a minute.
 3. **Inferno by ONC** — no signup, but running the PAS test kit takes a few minutes to configure and execute.
-4. **Availity mock mode** — already live at `/ehr` on every PAS submission. Nothing to do.
-5. **Availity live mode** — sign up at [developer.availity.com](https://developer.availity.com/partner/gettingstarted), create demo app, set `AVAILITY_CLIENT_ID` and `AVAILITY_CLIENT_SECRET` on Cloud Run. Roughly 30 minutes end to end because of MFA setup and app registration.
-6. **Epic on FHIR, SMART launch** — already registered (see Section 4). No further work unless the app is deleted or Epic changes their sandbox model to expose a self-serve EHR launcher for CMS Prior Auth apps.
-7. **Epic Backend Services** — already registered and live (see Section 4a). Nothing further to do.
-8. **Optum** — already registered and live (see Section 6). Nothing further to do.
+4. **Availity Coverages** — already registered and live (see Section 5). Fires from `/ehr` on every order sign as a real X12 270/271 eligibility check.
+5. **Epic on FHIR, SMART launch** — already registered (see Section 4). No further work unless the app is deleted or Epic changes their sandbox model to expose a self-serve EHR launcher for CMS Prior Auth apps.
+6. **Epic Backend Services** — already registered and live (see Section 4a). Nothing further to do.
+7. **Optum** — already registered and live (see Section 6). Nothing further to do.
 
 ## 1. CDS Hooks Sandbox
 
@@ -159,25 +158,34 @@ Full launched-from-a-real-EHR round trip lives on the SMART App Launcher (Sectio
 - The Epic sandbox refreshes every Sunday at 8:00 PM Central. Any data written the prior week is wiped, and there may be intermittent errors around that time.
 - The Epic app is currently marked Ready for Production, which locks it from further edits. Adding new scopes or APIs would require a new app registration and a new client id.
 
-## 5. Availity clearinghouse
+## 5. Availity Coverages (eligibility clearinghouse)
 
-Availity's [developer portal](https://developer.availity.com/partner/gettingstarted) exposes an X12 278 Service Reviews API for prior authorization requests, with a free demo tier that returns canned responses via the `X-Api-Mock-Scenario-ID` header.
+Availity is the largest US healthcare clearinghouse. Their [Coverages API](https://developer.availity.com/blog/2025/3/25/hipaa-transactions) is an X12 270/271 eligibility inquiry — active/inactive coverage plus plan/benefit details for a given patient at a given payer — wrapped in JSON, with OAuth 2.0 `client_credentials` auth against `api.availity.com`.
 
-Every PAS submission from `/ehr` now fans out in parallel: the FHIR PAS Bundle goes to the sandbox's own payer endpoint, and the same Bundle is projected to Availity's JSON envelope and posted to their Service Reviews API. The approved PA card and the Availity certified card appear side by side in the EHR.
+This was originally built against Availity's Service Reviews API (X12 278 prior authorization) but pivoted to Coverages after empirical testing revealed our developer credentials are subscribed to the "Healthcare HIPAA Transactions - Demo" product, which includes Coverages but not Service Reviews. Correcting the OAuth scope alone did not fix it — the product itself did not carry that API.
+
+The Coverages check fires from `/ehr` on every order sign, alongside the CDS Hooks card and Optum's second CRD opinion — matching real workflow, since eligibility is naturally a pre-order verification. The result renders in its own sky-blue panel next to the CDS card.
 
 Mode indicator on each response:
 
-- `live` — real HTTP call to `qua.api.availity.com/arp/ar-routing/external`, credentials configured
-- `mock-no-credentials` — canned local response; no outbound call made because `AVAILITY_CLIENT_ID` / `AVAILITY_CLIENT_SECRET` are not set
+- `live` — real HTTP call to `https://api.availity.com/availity/v1/coverages`, credentials configured
+- `mock-no-credentials` — canned local response; no outbound call because `AVAILITY_CLIENT_ID` / `AVAILITY_CLIENT_SECRET` are not set
 - `mock-forced` — canned response even though credentials are present (`AVAILITY_MOCK=on`)
 - `disabled` — `AVAILITY_ENABLED=off`, integration returns 501
+
+**Two real quirks found only by live testing against Availity's sandbox**, both worth recording since Availity's own docs got them wrong:
+
+- **OAuth scope is `healthcare-hipaa-transactions-demo` alone**, not the dual scope `healthcare-hipaa-transactions healthcare-hipaa-transactions-demo` Availity's own worked example on their blog post shows. The dual scope returns `unauthorized_client`; the single `-demo` scope succeeds.
+- **Demo-tier responses are synchronous**, not async (HTTP 200 with a fully-populated `coverages[]` array in one round trip). Service Reviews required a poll loop; Coverages does not.
+
+Also worth noting: the demo sandbox returns a canned patient (ZENA MARDIN) regardless of the submitted request body — Availity's sandbox does not vary its response by request content for this product.
 
 Enabling live mode:
 
 1. [Sign up at developer.availity.com](https://developer.availity.com/partner/gettingstarted)
 2. Complete email verification and MFA
 3. Create an organization, then a Demo-plan application
-4. Subscribe the app to the Service Reviews API (Demo subscriptions are auto-approved)
+4. Subscribe to a product that includes Coverages (the "Healthcare HIPAA Transactions - Demo" product is what these credentials use, and includes Coverages, Patient Cost Estimator, Claim Statuses, Dental Claims, and Payer List)
 5. Copy the client_id and client_secret
 6. Set `AVAILITY_CLIENT_ID`, `AVAILITY_CLIENT_SECRET` on Cloud Run:
    ```powershell
@@ -185,7 +193,7 @@ Enabling live mode:
      --update-env-vars AVAILITY_CLIENT_ID=<id>,AVAILITY_CLIENT_SECRET=<secret>
    ```
 
-The projection module is at `lib/availity.js` and the outbound endpoint is `app/api/availity/service-review/route.js`. Requests are logged to the UM transaction feed with actor `AVAILITY`.
+The client is at `lib/availity.js` and the outbound endpoint is `app/api/availity/coverage-check/route.js`. Requests are logged to the UM transaction feed with actor `AVAILITY` and action `COVERAGE CHECK`.
 
 ## 6. Optum real payer API
 

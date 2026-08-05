@@ -9,11 +9,11 @@ export const dynamic = 'force-dynamic';
  *
  * POST /api/optum/pas-submit
  * Body: the same PAS FHIR Bundle /api/pas/submit and
- * /api/availity/service-review receive -- Optum's Claim/$submit expects a
+ * receives -- Optum's Claim/$submit expects a
  * Da Vinci PAS-shaped Bundle too, so it is forwarded with no
- * transformation. This is the third parallel PAS path alongside this
- * sandbox's own engine and Availity's X12 278 projection: same Bundle,
- * submitted to a real independent payer's implementation of the same
+ * transformation. This runs alongside this sandbox's own PAS engine:
+ * the same Bundle, submitted to a real independent payer's implementation
+ * of the same Da Vinci PAS operation.
  * CMS-0057-F mandate.
  */
 export async function POST(request) {
