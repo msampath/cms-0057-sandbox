@@ -14,7 +14,7 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 | [Epic Backend Services](#4a-epic-backend-services-reading-epics-own-test-patients) | EHR-facing (outbound) | Yes | **Yes — live token exchange, real Patient resources read** |
 | [Epic on FHIR, SMART launch](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Registered, OAuth accepts client; live launch limited by Epic sandbox |
 | [Availity Coverages](#5-availity-coverages-eligibility-clearinghouse) | Clearinghouse (outbound) | Yes | **Yes — live X12 270/271 eligibility calls against Availity's real sandbox** |
-| [Optum](#6-optum-real-payer-api) | Payer-facing (outbound) | Yes | **Yes — live token exchange and all four operations against a real UnitedHealthcare-shaped API** |
+| [Optum](#6-optum-real-payer-api) | Payer-facing (outbound) | Yes | **Yes for the CRD → DTR → PAS chain.** Provider Access `$bulk-member-match` and `$davinci-data-export` return 400 / 405 against the live sandbox in shapes the OAS does not explain, mock mode covers both end to end. |
 
 ## Setup order, quickest first
 
@@ -105,9 +105,24 @@ The `/ehr` DTR pane then maps demographic defines (`PatientGivenName` / `Patient
 
 Design constraints worth naming:
 
-- **Epic's public FHIR sandbox does not expose a server-side CQL evaluation endpoint** (`$cql` / `Library/$evaluate`). Client-side execution is the actual Da Vinci DTR pattern in the wild; that is what happens here.
-- **`cql-execution` runs ELM JSON, not CQL text.** There is no pure-JS CQL-to-ELM translator; the reference implementation is Java. ELM must be precompiled offline (cqframework's translation service, or the Java CLI) and committed. The committed `.elm.json` for MRIBrainPrepopulation was hand-authored to a minimal shape when the public translators were unreachable; the accompanying `.cql` documents the intent and is what to feed the translator when the library changes.
-- Extending the library to a real clinical define (e.g. "chest pain in last 6 months from Observation with LOINC 8577-6") is one CQL edit + one re-translation + one linkId heuristic in `/ehr`. The pipeline is the work; adding defines is downstream mechanics.
+- Epic's public FHIR sandbox does not expose a server-side CQL evaluation endpoint (`$cql` or `Library/$evaluate`). Client-side execution is the actual Da Vinci DTR pattern in the wild, and that is what happens here.
+- `cql-execution` runs ELM JSON, not CQL text. There is no pure-JS CQL-to-ELM translator. The reference implementation is Java. ELM must be precompiled offline (cqframework's translation service, or the Java CLI) and committed. The committed `.elm.json` for MRIBrainPrepopulation was hand-authored to a minimal shape when the public translators were unreachable. The accompanying `.cql` documents the intent and is what to feed the translator when the library changes.
+- Extending the library to a real clinical define (e.g. "chest pain in last 6 months from Observation with LOINC 8577-6") is one CQL edit → one re-translation → one linkId heuristic in `/ehr`. The pipeline is the work. Adding defines is downstream mechanics.
+
+**Live verification outcome**
+
+Curl against the deployed instance (`POST /api/dtr/prepopulate` with `epicPatientId: erXuFYUfucBZaryVksYEcMg3`, no `libraryId` so it defaults to MRIBrainPrepopulation):
+
+- `mode: "live"`, real Epic assertion claims returned in the envelope
+- `results.PatientGivenName: "Camila"`, `PatientFamilyName: "Lopez"`, `PatientDOB: "1987-09-12"`, `PatientGender: "female"` — real Epic identity, evaluated by the ELM library against Epic's actual Patient resource
+- `results.HasRelevantNeuroCondition: false` — no matching Conditions in the bundle, because Epic returned only Patient
+- `bundleSummary.totalEntries: 1`, `byResourceType: { Patient: 1 }`
+- `warnings: [{ resourceType: "Condition", status: 403, body: null }, { resourceType: "Observation", status: 403, body: null }]`
+
+Two things worth calling out from that outcome:
+
+- Epic denied `Condition.Read` and `Observation.Read` in the current app registration. Only `Patient.Read` and `Coverage.Read` were requested when the app was created (see Registration line above). Adding the two scopes requires a new app registration on Epic's portal (the existing one is Ready for Production and locked), then Epic's up-to-30-minute sync delay.
+- The partial-failure design held up under a real 403. The Patient read succeeded and the CQL still evaluated. The two failing resource types landed in `warnings[]` with their HTTP status, and the demographic defines came back correctly. Adding Condition and Observation later flips the clinical define from `false` to a real evaluation, no other code change needed.
 
 ## 4. Epic on FHIR
 
@@ -236,15 +251,24 @@ Mode indicator on each response, same convention as Availity: `live`, `mock-no-c
 
 Two shape corrections landed alongside the sandbox-member wiring:
 
-- **`$bulk-member-match` request** was submitted as a flat `MemberPatient` + `CoverageToMatch` parameter pair. The documented PDex multi-member-match shape puts both under a single `MembersToMatch` parameter's `part[]` alongside a provider treatment-relationship `Consent`, with `meta.profile` = `.../provider-parameters-multi-member-match-bundle-in`. The old shape worked live (Optum's parser is forgiving), the new shape is what the spec says.
-- **`$questionnaire-package` request** was sending `coverage` + `patient` parameters. The documented shape is `coverage` + `context` (a valueString uuid). Now aligned.
+- `$bulk-member-match` request was submitted as a flat `MemberPatient` + `CoverageToMatch` parameter pair. The documented PDex multi-member-match shape puts both under a single `MembersToMatch` parameter's `part[]` alongside a provider treatment-relationship `Consent`, with `meta.profile` = `.../provider-parameters-multi-member-match-bundle-in`. The old shape used to work live. The spec shape does not.
+- `$questionnaire-package` request was sending `coverage` + `patient` parameters. The documented shape is `coverage` + `context` (a valueString uuid). Both work live.
 
-The `/um` Provider Access panel exposes a source toggle to make the two outcomes side-by-side:
+The `/um` Provider Access panel exposes a source toggle:
 
-- **Sandbox members** — one of `lib/optumSandboxMembers.js`, returned in `MatchedMembers`.
-- **Demo patients** — one of `lib/patients.js`, returned in `NonMatchedMembers` because Optum's roster does not know them. Honest outcome that still proves the request reached a real payer implementation.
+- Sandbox members: one of `lib/optumSandboxMembers.js`, submitted with the spec-shape PDex bundle.
+- Demo patients: one of `lib/patients.js`, submitted with the same shape but this sandbox's own BCBSIL identity.
 
-**Bulk export chain (Da Vinci `$davinci-data-export`) — wired, live outcome unverified.** Optum's Provider Access OAS documents the full async export flow. Client-side it is `lib/optumBackend.js` `kickoffDavinciExport` / `pollExportStatus` / `downloadExportFile`; routes are `app/api/optum/export/kickoff|status/[jobId]|download/[fileName]/`; the UI is a three-step panel in the `/um` Optum card that chains off the matched group id from `$bulk-member-match`. Mock mode returns the OAS example verbatim (kickoff OperationOutcome, manifest with one Patient NDJSON file, one-line canned Patient body) so the flow runs end to end with zero credentials. Live sandbox behavior is captured empirically the next time it is exercised — sandbox may complete synchronously, 202-then-never-complete, or error; either outcome is documented here honestly.
+**Bulk export chain wired.** Client-side it is `lib/optumBackend.js` `kickoffDavinciExport` → `pollExportStatus` → `downloadExportFile`. Routes are `app/api/optum/export/kickoff|status/[jobId]|download/[fileName]/`. The UI is a three-step panel in the `/um` Optum card that chains off the matched group id from `$bulk-member-match`. Mock mode returns the OAS example verbatim (kickoff OperationOutcome, manifest with one Patient NDJSON file, one-line canned Patient body) so the flow runs end to end with zero credentials.
+
+**Live verification outcomes for the two new operations**
+
+Curl against the deployed instance, both credentials configured, in `live` mode:
+
+- `POST /api/optum/provider-member-match` with the spec-shape PDex bundle returns `400 payerId or lob path param is missing`. Same error message and same pattern as the CDS Hooks path quirk above. The sandbox's real endpoint expects a URL shape or body layout that differs from the OAS, and Optum's own docs do not show what the accepted one is. The old flat-parameter shape used to succeed at this endpoint. The spec shape does not.
+- `POST /api/optum/export/kickoff` for `$davinci-data-export` returns `405 Method Not Allowed`. The error body echoes the path as `/oihub/fhir-provider-access/R4/87726/bh/Group/{groupId}/$davinci-data-export`, with a hyphen (`fhir-provider-access`) that our request does not carry (`fhirprovideraccess`). Two possibilities: Optum's gateway rewrote the path in the error message and the real cause is elsewhere, or the export operation lives under a different base path than the sibling operations. The OAS shows the same base for all Provider Access operations. Their support inbox is the next step.
+
+Both are the same class of finding the CDS Hooks path quirk in the row above already documents: the sandbox's live endpoints occasionally accept a request shape that its own OAS example does not show, and vice versa. Mock mode is unaffected in either case and the demo still walks the full three-step flow end to end.
 
 The outbound client is `lib/optumBackend.js`, following the same four-mode gating pattern as `lib/epicBackend.js` and `lib/availity.js`. Routes are `app/api/optum/cds-order-sign/`, `app/api/optum/dtr-questionnaire/`, `app/api/optum/pas-submit/`, `app/api/optum/provider-member-match/`, and the three export routes above. Requests are logged to the UM transaction feed with actor `OPTUM`.
 
