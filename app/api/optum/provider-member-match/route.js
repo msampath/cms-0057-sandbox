@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { bulkMemberMatch, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
 import { getPatient, PATIENT_LIST } from '@/lib/patients';
+import { getOptumSandboxMember } from '@/lib/optumSandboxMembers';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,33 +10,71 @@ export const dynamic = 'force-dynamic';
  * Optum Real Provider Access API -- Da Vinci PDex $bulk-member-match.
  *
  * POST /api/optum/provider-member-match
- * Body: { patientId?: string } -- one of the four demo patients from
- * lib/patients.js. Defaults to the first demo patient if omitted.
+ * Body: {
+ *   source: 'sandbox' | 'demo',                  // default 'sandbox'
+ *   sandboxMemberId?: string,                    // when source==='sandbox'
+ *   patientId?: string,                          // when source==='demo'
+ *   npi?: string                                 // the panel's active NPI;
+ *                                                // logged so /api/provider-access
+ *                                                // surfaces this event in its
+ *                                                // NPI-scoped panel
+ * }
  *
- * Real payer-side provider access, alongside this sandbox's own
- * Provider Access API and Epic's EHR-side Backend Services read --
- * three different actor types (our payer, a real EHR, a real payer)
- * covering the same CMS-0057-F attribution concept.
+ * `sandbox` submits one of Optum's own canonical Try-It members
+ * (lib/optumSandboxMembers.js) -- these come back MATCHED because
+ * Optum's canned sandbox response marks their exact demographics.
+ * `demo` submits one of this sandbox's BCBSIL demo patients
+ * (lib/patients.js) -- these land in NonMatchedMembers because
+ * Optum's roster does not know them. Both outcomes are truthful and
+ * make different points; the /um panel toggles between them.
  */
 export async function POST(request) {
-  let patientId;
+  let body = {};
   try {
-    const body = await request.json();
-    patientId = body?.patientId;
+    body = await request.json();
   } catch {
-    // no JSON body supplied -- fall through to the default patient
+    // fall through with defaults
   }
-  const patient = getPatient(patientId) || PATIENT_LIST[0];
+  const source = body?.source === 'demo' ? 'demo' : 'sandbox';
+
+  let subject;
+  let displayName;
+  let displayId;
+  let subjectNpi;
+  if (source === 'sandbox') {
+    subject = getOptumSandboxMember(body?.sandboxMemberId) || getOptumSandboxMember('optum-emr-98765');
+    displayName = subject.memberPatient?.name?.[0]
+      ? `${(subject.memberPatient.name[0].given || []).join(' ')} ${subject.memberPatient.name[0].family}`.trim()
+      : subject.label;
+    // The FHIR identifier Optum echoes back in its response's contained
+    // Patient (e.g. "EMR-98765"), not our internal registry key.
+    displayId = subject.memberPatient?.identifier?.[0]?.value || subject.id;
+  } else {
+    subject = getPatient(body?.patientId) || PATIENT_LIST[0];
+    displayName = subject.name;
+    displayId = subject.subscriberId;
+    subjectNpi = subject.npi;
+  }
+  // Client-supplied npi wins -- lets the /um panel's active NPI attach
+  // the log entry to that panel regardless of which subject was picked.
+  const logNpi = body?.npi || subjectNpi;
 
   try {
-    const result = await bulkMemberMatch(patient);
+    const result = await bulkMemberMatch(subject);
     logTransaction(
       'OPTUM',
       'PROVIDER BULK MEMBER MATCH',
-      { mode: result.mode, patient: patient.name },
-      { patientId: patient.id }
+      { mode: result.mode, source, subject: displayName },
+      {
+        npi: logNpi,
+        patientId: source === 'demo' ? subject.id : undefined
+      }
     );
-    return NextResponse.json({ ...result, patient: { id: patient.id, name: patient.name, subscriberId: patient.subscriberId } });
+    return NextResponse.json({
+      ...result,
+      source,
+      subject: { id: subject.id, name: displayName, identifier: displayId }
+    });
   } catch (e) {
     const status = e.status || 502;
     return NextResponse.json({ error: e.message, body: e.body, mode: optumMode() }, { status });

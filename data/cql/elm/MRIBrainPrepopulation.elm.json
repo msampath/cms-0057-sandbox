@@ -1,0 +1,111 @@
+{
+  "_comment": [
+    "ELM JSON for MRIBrainPrepopulation.cql, hand-authored.",
+    "The public CQL-to-ELM translation service (cqframework.dev, alphora, hapi) was unreachable when this was written; the Java translator is the reference implementation but is not committed here.",
+    "Runtime consumer: lib/cql.js, via cql-execution v3 against FHIR R4 Patient bundles from cql-exec-fhir.",
+    "When this file is regenerated with the Java translator, expect additional 'annotation', 'sourceLocator', and 'localId' fields -- runtime behavior is the same either way."
+  ],
+  "library": {
+    "identifier": { "id": "MRIBrainPrepopulation", "version": "1.0.0" },
+    "schemaIdentifier": { "id": "urn:hl7-org:elm", "version": "r1" },
+    "usings": {
+      "def": [
+        { "localIdentifier": "System", "uri": "urn:hl7-org:elm-types:r1" },
+        { "localIdentifier": "FHIR", "uri": "http://hl7.org/fhir", "version": "4.0.1" }
+      ]
+    },
+    "statements": {
+      "def": [
+        {
+          "name": "Patient",
+          "context": "Patient",
+          "expression": {
+            "type": "SingletonFrom",
+            "operand": {
+              "dataType": "{http://hl7.org/fhir}Patient",
+              "templateId": "http://hl7.org/fhir/StructureDefinition/Patient",
+              "type": "Retrieve"
+            }
+          }
+        },
+        {
+          "name": "PatientGivenName",
+          "context": "Patient",
+          "accessLevel": "Public",
+          "expression": {
+            "type": "Indexer",
+            "operand": [
+              {
+                "path": "given",
+                "type": "Property",
+                "source": {
+                  "type": "First",
+                  "source": {
+                    "path": "name",
+                    "type": "Property",
+                    "source": { "name": "Patient", "type": "ExpressionRef" }
+                  }
+                }
+              },
+              {
+                "valueType": "{urn:hl7-org:elm-types:r1}Integer",
+                "value": "0",
+                "type": "Literal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "PatientFamilyName",
+          "context": "Patient",
+          "accessLevel": "Public",
+          "expression": {
+            "path": "family",
+            "type": "Property",
+            "source": {
+              "type": "First",
+              "source": {
+                "path": "name",
+                "type": "Property",
+                "source": { "name": "Patient", "type": "ExpressionRef" }
+              }
+            }
+          }
+        },
+        {
+          "name": "PatientDOB",
+          "context": "Patient",
+          "accessLevel": "Public",
+          "expression": {
+            "path": "birthDate",
+            "type": "Property",
+            "source": { "name": "Patient", "type": "ExpressionRef" }
+          }
+        },
+        {
+          "name": "PatientGender",
+          "context": "Patient",
+          "accessLevel": "Public",
+          "expression": {
+            "path": "gender",
+            "type": "Property",
+            "source": { "name": "Patient", "type": "ExpressionRef" }
+          }
+        },
+        {
+          "name": "HasRelevantNeuroCondition",
+          "context": "Patient",
+          "accessLevel": "Public",
+          "expression": {
+            "type": "Exists",
+            "operand": {
+              "dataType": "{http://hl7.org/fhir}Condition",
+              "templateId": "http://hl7.org/fhir/StructureDefinition/Condition",
+              "type": "Retrieve"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
 import { PAS_PROFILES } from '@/lib/fhir';
@@ -397,6 +397,121 @@ export default function EhrDashboard() {
   const [optumQuestionnaireLoading, setOptumQuestionnaireLoading] = useState(false);
   const [optumPasResult, setOptumPasResult] = useState(null);
   const [optumPasLoading, setOptumPasLoading] = useState(false);
+  // DTR pre-population via CQL against Epic-fetched FHIR data.
+  // Populated only when the active scenario is an Epic test patient
+  // and the user clicks "Pre-populate from Epic via CQL" in the DTR pane.
+  const [prepop, setPrepop] = useState(null);
+  const [prepopLoading, setPrepopLoading] = useState(false);
+  const [prepopFilledLinks, setPrepopFilledLinks] = useState({}); // linkId -> defineName
+  // Invalidation token for in-flight prepop requests. A plain closure
+  // over `scenarioId`/`scenario`/`questionnaire` cannot detect a
+  // context change post-await because those are `const` bindings from
+  // the render that scheduled the async call -- a later render's
+  // state change never mutates that closure. The ref persists across
+  // renders and is bumped either at kickoff (marking a new request as
+  // the winner) or by invalidatePrepop() / the context-change effect
+  // below (marking every in-flight request as superseded), so an
+  // already-running invocation can dereference `.current` and see
+  // the truth.
+  const prepopReqRef = useRef(0);
+  // AbortController for the currently in-flight /api/dtr/prepopulate
+  // fetch, if any. Held in a ref so invalidatePrepop() can cancel it
+  // synchronously and reclaim the network slot -- otherwise clearing
+  // prepopLoading would let the user re-click Pre-populate while the
+  // stale request is still on the wire, doubling the traffic and
+  // misrepresenting the loading state.
+  const prepopAbortRef = useRef(null);
+  // Request-supersession counter for outbound Epic Patient reads.
+  // fetchEpicTestPatient captures myReq at kickoff and only applies
+  // its result if myReq === epicFetchReqRef.current at resolve time.
+  // Bumped by (a) every fetchEpicTestPatient kickoff (so an older
+  // in-flight call is superseded by a newer click), and (b) any
+  // non-Epic scenario switch (so the user's deliberate move to a
+  // static scenario is not silently reverted when a stale Epic
+  // fetch finally resolves and unconditionally sets scenarioId
+  // back to 'epic-patient').
+  const epicFetchReqRef = useRef(0);
+  // Order-context version counter -- bumped on any change that would
+  // invalidate an in-flight order-sign / PAS / Optum / Availity /
+  // DTR-questionnaire fetch:
+  //   (a) scenario switch or Epic patient swap (via scenario-reset effect)
+  //   (b) order-picker or plan-type edit (via invalidateOrderContext)
+  // Long-running fetches stamp `myVersion = scenarioVersionRef.current`
+  // at kickoff and only apply their result if the version still
+  // matches at resolve time. Otherwise a mid-flight change could let
+  // a fetch scoped to the OLD context silently overwrite state
+  // belonging to the NEW context (cross-patient or cross-order).
+  const scenarioVersionRef = useRef(0);
+  // Single entry point for "the current DTR context is going away or
+  // being replaced". Called synchronously from every user action that
+  // changes scenarioId / scenario.patientId / questionnaire.id so
+  // that in-flight prepop requests bail out before their fetch
+  // resolves. Also clears prepop state and the loading flag directly
+  // -- do not rely on the identity-change effect below for this,
+  // because the effect only re-fires when a dep VALUE actually
+  // changes, so idempotent re-clicks (re-launching DTR for the same
+  // questionnaire, re-picking the active Epic patient) would leave
+  // the loading indicator stuck otherwise.
+  const invalidatePrepop = () => {
+    prepopReqRef.current += 1;
+    if (prepopAbortRef.current) {
+      prepopAbortRef.current.abort();
+      prepopAbortRef.current = null;
+    }
+    setPrepopLoading(false);
+    setPrepop(null);
+    setPrepopFilledLinks({});
+  };
+
+  // Called when the user edits the order picker (preset select,
+  // custom code) or plan-type -- any change that means the current
+  // order-scoped state and any in-flight order-scoped fetches now
+  // belong to the WRONG order. Bumps scenarioVersionRef unconditionally
+  // so all in-flight order-scoped fetches' stillCurrent() guards fire,
+  // and clears order-scoped state regardless of whether DTR is
+  // currently showing -- the CDS card, Optum panels, Availity panel,
+  // and PAS response can all be stale even before Launch DTR is
+  // clicked (signOrder populates them but keeps showDtr false), and
+  // leaving them in place lets the user open the OLD order's DTR
+  // via the CDS card's SMART link and submit a cross-order Bundle.
+  // React 18 bails out on same-value setState calls, so this is
+  // cheap on keystrokes where nothing is actually dirty.
+  const invalidateOrderContext = () => {
+    scenarioVersionRef.current += 1;
+    setShowDtr(false);
+    setQuestionnaire(null);
+    setCqlLibrary(null);
+    setAnswers({});
+    setSmartContext(null);
+    setCard(null);
+    setSystemAction(null);
+    setPasResponse(null);
+    setPendedId(null);
+    setWasPended(false);
+    setOptumOrderSign(null);
+    setOptumOrderSignLoading(false);
+    setOptumQuestionnaire(null);
+    setOptumQuestionnaireLoading(false);
+    setOptumPasResult(null);
+    setOptumPasLoading(false);
+    setAvailityResult(null);
+    setAvailityLoading(false);
+    // Debug toggles are per-order-attempt sandbox levers, not
+    // persistent preferences -- same rationale the scenario-reset
+    // effect uses. Carrying them across an order-picker edit would
+    // silently trip a hard-stop / denial on an order the user didn't
+    // opt into that debug mode for.
+    setHardStopFlag(false);
+    setSimulateDenial(false);
+    // Also clear the generic `loading` flag -- signOrder / launchDtr /
+    // submitPas set it true and would normally clear it in their own
+    // completion path, but their stillCurrent() bail (fired by the
+    // ref bump above) returns before hitting setLoading(false),
+    // leaving both the Sign Order and Submit PAS buttons stuck
+    // disabled otherwise.
+    setLoading(false);
+    invalidatePrepop();
+  };
 
   useEffect(() => {
     const session = getLaunchedSession();
@@ -414,6 +529,12 @@ export default function EhrDashboard() {
   // When the selected scenario changes, update plan type, default order, and
   // reset all card/response state so the new context starts clean.
   useEffect(() => {
+    // Bump the scenario version so any in-flight order-sign / PAS /
+    // Optum / Availity fetch discards its response when it resolves
+    // -- gating check in each fetch's .then guard. Fires on mount
+    // (harmless: nothing in flight) and on every scenario or Epic
+    // patient change.
+    scenarioVersionRef.current += 1;
     setPlanType(scenario.planType);
     if (scenario.defaultOrderIndex != null) {
       setSelectedIndex(scenario.defaultOrderIndex);
@@ -428,25 +549,69 @@ export default function EhrDashboard() {
     setPendedId(null);
     setWasPended(false);
     setSimulateDenial(false);
+    // Reset debug toggles too -- hardStopFlag is a per-order-attempt
+    // sandbox lever, not a persistent user preference. Carrying it
+    // forward would silently trip a hard-stop CDS response on a
+    // patient the user hadn't opted into that debug mode for.
+    setHardStopFlag(false);
     setQuestionnaire(null);
     setCqlLibrary(null);
     setAnswers({});
     setSmartContext(null);
     setLoading(false);
     setOptumOrderSign(null);
+    setOptumOrderSignLoading(false);
     setOptumQuestionnaire(null);
+    setOptumQuestionnaireLoading(false);
     setOptumPasResult(null);
+    setOptumPasLoading(false);
     setAvailityResult(null);
-  }, [scenarioId]); // eslint-disable-line react-hooks/exhaustive-deps
+    setAvailityLoading(false);
+    setPrepop(null);
+    setPrepopFilledLinks({});
+    // NOTE: the *Loading flags above are cleared here because each
+    // fetch's own stillCurrent()-gated finally skips its own clear on
+    // supersession -- without this the spinner panel gated on
+    // `(xLoading || xResult)` would keep rendering after a scenario
+    // switch, even though no request is actually in flight.
+    // Depends on scenario.patientId as well so that switching between
+    // two Epic sandbox patients (which keeps scenarioId === 'epic-patient'
+    // but changes the underlying identity) triggers a full DTR reset --
+    // otherwise the DTR panel keeps rendering the prior patient's
+    // questionnaire + answers while the page header shows the new one,
+    // and a subsequent Submit PAS would emit a cross-patient FHIR Bundle.
+  }, [scenarioId, scenario.patientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Invalidate any in-flight CQL prepop request whenever the identity
+  // it was made for changes. Bumping the ref makes the running
+  // invocation's `myReq !== prepopReqRef.current` check fire and
+  // discard the (now cross-context) result. Also releases the loading
+  // flag so a state-driven cancellation (patient switch without a
+  // new click) doesn't leave the button stuck on "Evaluating...".
+  useEffect(() => {
+    prepopReqRef.current += 1;
+    setPrepopLoading(false);
+    setPrepop(null);
+    setPrepopFilledLinks({});
+  }, [scenarioId, scenario.patientId, questionnaire?.id]);
 
   // Poll for pended PA determination every 2 seconds until finalized.
   useEffect(() => {
     if (!pendedId) return;
+    // Capture the scenario version at effect setup. If the user
+    // switches scenarios between polls, the interval is cleared by
+    // the effect's cleanup -- but a fetch already awaiting inside a
+    // prior interval tick keeps running to completion. Without this
+    // guard, its `finalized` branch would call setPasResponse etc.
+    // and paint the old patient's determination into the newly
+    // selected patient's state.
+    const pollVersion = scenarioVersionRef.current;
     const iv = setInterval(async () => {
       try {
         const res = await fetch(apiUrl(`/api/pas/pended/${pendedId}`));
         if (!res.ok) return;
         const data = await res.json();
+        if (scenarioVersionRef.current !== pollVersion) return;
         if (data.status === 'finalized') {
           clearInterval(iv);
           const { claimResponse, task } = extractPasResponse(data.responseBundle);
@@ -479,13 +644,35 @@ export default function EhrDashboard() {
     setSystemAction(null);
     setShowDtr(false);
     setPasResponse(null);
+    // Also clear the pended state -- otherwise re-signing the same
+    // order after a prior submission that pended leaves pendedId set,
+    // the pending poll still running for the OLD preAuthRef, and its
+    // late 'finalized' payload will overwrite whatever the new
+    // submission returns. The pended-banner render also gates on
+    // pendedId, so the stale "PA Pended" message would hide the new
+    // response entirely.
+    setPendedId(null);
+    setWasPended(false);
     setQuestionnaire(null);
     setCqlLibrary(null);
     setAnswers({});
     setSmartContext(null);
     setOptumOrderSign(null);
     setAvailityResult(null);
+    // DTR CQL prepop is tied to a specific questionnaire + order. All
+    // questionnaires reuse generic sequential linkIds ("1", "2", "3")
+    // for different question text, so leaving stale prepopFilledLinks
+    // in place across orders would mislabel unrelated fields with a
+    // "Prefilled from live CQL" badge for a define that never ran.
+    // Also invalidates any in-flight prepop request synchronously.
+    invalidatePrepop();
     setLoading(true);
+    // Stamp the scenario version at kickoff -- every fetch below
+    // gates its state write on this so a scenario switch mid-flight
+    // discards the stale response instead of overwriting the
+    // newly-selected patient's just-reset state.
+    const myVersion = scenarioVersionRef.current;
+    const stillCurrent = () => scenarioVersionRef.current === myVersion;
 
     const patient = buildPatientResource(scenario, order.conditions);
     const coverage = buildCoverageResource(scenario);
@@ -508,6 +695,7 @@ export default function EhrDashboard() {
       body: JSON.stringify(payload)
     });
     const data = await res.json();
+    if (!stillCurrent()) return; // scenario switched mid-flight; drop
     setCard(data.cards?.[0] || null);
     // Persist the incoming coverage-information system action so the EHR
     // can show "machine-readable PA determination has been received" in its
@@ -530,9 +718,9 @@ export default function EhrDashboard() {
         })
       })
         .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .then((result) => setOptumOrderSign(result))
-        .catch((err) => setOptumOrderSign({ ok: false, json: { error: err.message } }))
-        .finally(() => setOptumOrderSignLoading(false));
+        .then((result) => { if (stillCurrent()) setOptumOrderSign(result); })
+        .catch((err) => { if (stillCurrent()) setOptumOrderSign({ ok: false, json: { error: err.message } }); })
+        .finally(() => { if (stillCurrent()) setOptumOrderSignLoading(false); });
 
       // Availity Coverages: verify the patient has active eligibility at
       // the payer via a real clearinghouse call (X12 270/271). Fires
@@ -544,9 +732,9 @@ export default function EhrDashboard() {
         body: JSON.stringify({ patientId: patient.id })
       })
         .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .then((result) => setAvailityResult(result))
-        .catch((err) => setAvailityResult({ ok: false, json: { error: err.message } }))
-        .finally(() => setAvailityLoading(false));
+        .then((result) => { if (stillCurrent()) setAvailityResult(result); })
+        .catch((err) => { if (stillCurrent()) setAvailityResult({ ok: false, json: { error: err.message } }); })
+        .finally(() => { if (stillCurrent()) setAvailityLoading(false); });
     }
   };
 
@@ -564,38 +752,94 @@ export default function EhrDashboard() {
     setSmartContext(ctx);
     setShowDtr(true);
     setLoading(true);
+    // Stamp the scenario version so this launch's fetches are
+    // discarded if the user changes scenario or Epic patient
+    // mid-flight -- otherwise a late Optum DTR-questionnaire response
+    // for patient A could land in patient B's DTR panel.
+    const myVersion = scenarioVersionRef.current;
+    const stillCurrent = () => scenarioVersionRef.current === myVersion;
 
-    // Fetch the bound Questionnaire.
-    const qRes = await fetch(apiUrl(`/api/questionnaire/${ctx.questionnaireId}`));
-    const qJson = await qRes.json();
+    let qJson;
+    try {
+      // Fetch the bound Questionnaire. Guard the whole thing: a 404
+      // or non-JSON body would otherwise reject the async function
+      // silently, sticking `loading` true forever and skipping the
+      // prepop-invalidation guard below (which would let an
+      // in-flight prepop from the previous questionnaire land its
+      // results into indeterminate state).
+      const qRes = await fetch(apiUrl(`/api/questionnaire/${ctx.questionnaireId}`));
+      if (!qRes.ok) {
+        throw new Error(`Questionnaire fetch failed: HTTP ${qRes.status}`);
+      }
+      qJson = await qRes.json();
+    } catch (e) {
+      if (!stillCurrent()) return; // scenario switched during the fetch
+      setLoading(false);
+      // Also invalidate any in-flight prepop -- we opened the DTR
+      // panel then failed to load a new questionnaire; the prior
+      // questionnaire (if any) is still rendered underneath, so
+      // treat this as an identity change to be safe.
+      invalidatePrepop();
+      setQuestionnaire(null);
+      // Roll back showDtr and clear the Optum reference panel too --
+      // otherwise the DTR pane collapses (questionnaire=null gates
+      // the main form) but the Optum panel, gated only on showDtr,
+      // keeps rendering stale data from a prior successful launch.
+      setShowDtr(false);
+      setOptumQuestionnaire(null);
+      setOptumQuestionnaireLoading(false);
+      return;
+    }
+    if (!stillCurrent()) return; // scenario switched mid-flight
+    // Sync invalidate before scheduling the new questionnaire so an
+    // in-flight prepop from the previous questionnaire cannot race
+    // ahead of the identity effect and land its results here -- but
+    // only when the questionnaire identity is actually changing.
+    // Re-launching DTR for the same questionnaire (e.g. re-clicking
+    // the SMART launch button) must not clear a valid results panel
+    // whose CQL was run against this exact questionnaire.
+    const questionnaireChanged = questionnaire?.id !== qJson?.id;
+    if (questionnaireChanged) invalidatePrepop();
     setQuestionnaire(qJson);
 
-    // Seed answers using the SDC initialExpression — simulator pre-population.
-    // Honest framing: pre-population values are hardcoded to match what the
-    // bound CQL would return. The simulator does not execute CQL.
-    const seeded = {};
-    for (const item of qJson.item || []) {
-      const expr = item.extension?.find((e) =>
-        (e.url || '').includes('initialExpression')
-      )?.valueExpression?.expression;
-      if (!expr) continue;
-      seeded[item.linkId] = simulatedCqlResult(expr);
+    // Seed answers using the SDC initialExpression -- simulator
+    // pre-population. Only re-seed when the questionnaire actually
+    // changed; otherwise a same-questionnaire re-launch would silently
+    // discard every manually-typed answer for items without an
+    // initialExpression and revert prepop-derived values.
+    if (questionnaireChanged) {
+      const seeded = {};
+      for (const item of qJson.item || []) {
+        const expr = item.extension?.find((e) =>
+          (e.url || '').includes('initialExpression')
+        )?.valueExpression?.expression;
+        if (!expr) continue;
+        seeded[item.linkId] = simulatedCqlResult(expr);
+      }
+      setAnswers(seeded);
     }
-    setAnswers(seeded);
 
-    // Fetch the CQL library (if bound).
+    // Fetch the CQL library (if bound). Tolerant on failure -- library
+    // is only a reference display, not required for DTR to function.
     if (ctx.cqlLibraryId) {
-      const cRes = await fetch(apiUrl(`/api/cql/${ctx.cqlLibraryId}`));
-      if (cRes.ok) {
-        const lib = await cRes.json();
-        const raw =
-          lib?.content?.[0]?._cqlText ||
-          (lib?.content?.[0]?.data
-            ? atob(lib.content[0].data)
-            : '');
-        setCqlLibrary({ id: ctx.cqlLibraryId, text: raw });
+      try {
+        const cRes = await fetch(apiUrl(`/api/cql/${ctx.cqlLibraryId}`));
+        if (stillCurrent() && cRes.ok) {
+          const lib = await cRes.json();
+          if (stillCurrent()) {
+            const raw =
+              lib?.content?.[0]?._cqlText ||
+              (lib?.content?.[0]?.data
+                ? atob(lib.content[0].data)
+                : '');
+            setCqlLibrary({ id: ctx.cqlLibraryId, text: raw });
+          }
+        }
+      } catch {
+        // Library fetch is optional -- swallow and move on.
       }
     }
+    if (!stillCurrent()) return;
     setLoading(false);
 
     // Optum Real DTR: a reference panel showing what a real payer's DTR
@@ -609,15 +853,20 @@ export default function EhrDashboard() {
       body: JSON.stringify({ patientId: patient.id })
     })
       .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-      .then((result) => setOptumQuestionnaire(result))
-      .catch((err) => setOptumQuestionnaire({ ok: false, json: { error: err.message } }))
-      .finally(() => setOptumQuestionnaireLoading(false));
+      .then((result) => { if (stillCurrent()) setOptumQuestionnaire(result); })
+      .catch((err) => { if (stillCurrent()) setOptumQuestionnaire({ ok: false, json: { error: err.message } }); })
+      .finally(() => { if (stillCurrent()) setOptumQuestionnaireLoading(false); });
   };
 
   // ---- Phase 4: Submit PAS Bundle ----------------------------------------
   const submitPas = async (e) => {
     e.preventDefault();
     setLoading(true);
+    // Stamp the scenario version at kickoff so a mid-flight scenario
+    // switch causes both PAS branches to discard their results
+    // instead of overwriting the new patient's just-reset state.
+    const myVersion = scenarioVersionRef.current;
+    const stillCurrent = () => scenarioVersionRef.current === myVersion;
 
     const patient = buildPatientResource(scenario, order.conditions);
     const coverage = buildCoverageResource(scenario);
@@ -642,6 +891,14 @@ export default function EhrDashboard() {
     };
 
     setWasPended(false);
+    // Also clear pendedId at the top so re-submitting the same order
+    // starts from a clean pended state. Otherwise a prior 'queued'
+    // outcome's preAuthRef persists, and if the new submission
+    // returns non-queued, its response is hidden by the still-shown
+    // pended banner (which gates on pendedId).
+    setPendedId(null);
+    setPasResponse(null);
+    setSystemAction(null);
     setOptumPasResult(null);
     setOptumPasLoading(true);
 
@@ -663,6 +920,7 @@ export default function EhrDashboard() {
         .catch((e) => ({ ok: false, status: 0, json: { error: e.message } }))
     ]);
 
+    if (!stillCurrent()) return; // scenario switched mid-flight
     if (pasResult.status === 'fulfilled') {
       const data = pasResult.value;
       const { claimResponse, task } = extractPasResponse(data);
@@ -687,6 +945,15 @@ export default function EhrDashboard() {
   // Epic identity and, on success, activates it as the current scenario in
   // one step (no separate "use this patient" click needed).
   const fetchEpicTestPatient = async (id) => {
+    // Claim a request token BEFORE the await. Any later kickoff, or
+    // any deliberate non-Epic scenario switch (which also bumps this
+    // ref, see PATIENT_SCENARIOS click below), makes our resolution
+    // check `epicFetchReqRef.current !== myReq` fire and skip the
+    // state update -- otherwise a stale Epic fetch could resolve
+    // AFTER the user picked jane-doe / john-smith and silently
+    // revert their deliberate selection.
+    epicFetchReqRef.current += 1;
+    const myReq = epicFetchReqRef.current;
     setEpicPatientId(id);
     setEpicResult(null);
     setEpicError(null);
@@ -694,17 +961,143 @@ export default function EhrDashboard() {
     try {
       const res = await fetch(apiUrl(`/api/epic/patient?id=${encodeURIComponent(id)}`));
       const data = await res.json();
+      if (epicFetchReqRef.current !== myReq) {
+        // Superseded -- the user has moved on. Skip everything the
+        // apply-branch would have done, including setScenarioId.
+        return;
+      }
       if (!res.ok) {
         setEpicError(data?.error || `HTTP ${res.status}`);
       } else {
+        // Invalidate SYNCHRONOUSLY (before React schedules the
+        // re-render) but only if identity is actually changing --
+        // re-clicking the currently-active Epic patient would
+        // otherwise clear the prepop results panel and per-field
+        // badges while leaving the answers themselves populated,
+        // stranding the questionnaire in a state where filled fields
+        // have no visible CQL provenance.
+        const identityChanged =
+          scenarioId !== 'epic-patient' || scenario.patientId !== id;
+        if (identityChanged) invalidatePrepop();
         setEpicResult(data);
         setEpicScenario(buildEpicScenario(data, id));
         setScenarioId('epic-patient');
       }
     } catch (e) {
-      setEpicError(e.message);
+      if (epicFetchReqRef.current === myReq) {
+        setEpicError(e.message);
+      }
+    } finally {
+      if (epicFetchReqRef.current === myReq) {
+        setEpicLoading(false);
+      }
     }
-    setEpicLoading(false);
+  };
+
+  // ---- DTR pre-population via CQL against Epic-fetched FHIR data --------
+  // Only wired when the active scenario is an Epic test patient. Calls
+  // /api/dtr/prepopulate which fetches Patient + Condition + Observation
+  // from Epic (mock in dev), runs the MRIBrainPrepopulation ELM against
+  // that Bundle, and returns evaluated define values. We map the demo
+  // demographic defines to questionnaire items by heuristic text match
+  // and populate answers; the clinical define renders in a summary panel
+  // above the form.
+  const runCqlPrepop = async () => {
+    if (scenarioId !== 'epic-patient') return;
+    // Claim a fresh request token. The identity-change effect above
+    // bumps prepopReqRef whenever scenarioId, scenario.patientId, or
+    // questionnaire?.id changes; comparing prepopReqRef.current
+    // against `myReq` after the await tells us whether ANY of those
+    // changed while we were in flight, without needing a closure over
+    // the live state (which would be frozen at kickoff).
+    prepopReqRef.current += 1;
+    const myReq = prepopReqRef.current;
+    // Capture the identifiers we actually SENT to the server so we can
+    // use them for both the request body and any downstream lookups
+    // that depend on the state as it was at kickoff.
+    const requestPatientId = scenario.patientId;
+    const requestQuestionnaireItems = questionnaire?.item || [];
+    // Register an AbortController so invalidatePrepop() can cancel
+    // this fetch (freeing the network slot and firing our AbortError
+    // handler) if the user changes context mid-flight.
+    const controller = new AbortController();
+    prepopAbortRef.current = controller;
+    setPrepopLoading(true);
+    setPrepop(null);
+    setPrepopFilledLinks({});
+    try {
+      const res = await fetch(apiUrl('/api/dtr/prepopulate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ epicPatientId: requestPatientId, libraryId: 'MRIBrainPrepopulation' }),
+        signal: controller.signal
+      });
+      const json = await res.json();
+      if (prepopReqRef.current !== myReq) {
+        // Context changed while we were awaiting -- either the user
+        // switched Epic patients, switched scenarios, or re-signed a
+        // different order. Discard the result rather than write it
+        // into a now-unrelated context.
+        return;
+      }
+      setPrepop({ ok: res.ok, status: res.status, json });
+      if (res.ok) {
+        // Very light heuristic mapping: an item whose text (or linkId)
+        // clearly names a demographic gets the matching CQL result. We do
+        // not attempt to prefill clinical items -- those need real
+        // questionnaire authoring and are out of scope for this pass.
+        const results = json.results || {};
+        const filled = {};
+        for (const item of requestQuestionnaireItems) {
+          const key = `${item.linkId} ${item.text || ''}`.toLowerCase();
+          if (/given|first\s*name/.test(key) && results.PatientGivenName) {
+            filled[item.linkId] = { define: 'PatientGivenName', value: results.PatientGivenName };
+          } else if (/family|last\s*name|surname/.test(key) && results.PatientFamilyName) {
+            filled[item.linkId] = { define: 'PatientFamilyName', value: results.PatientFamilyName };
+          } else if (/birth|dob\b/.test(key) && results.PatientDOB) {
+            filled[item.linkId] = { define: 'PatientDOB', value: results.PatientDOB };
+          } else if (/gender|sex\b/.test(key) && results.PatientGender) {
+            filled[item.linkId] = { define: 'PatientGender', value: results.PatientGender };
+          }
+        }
+        // Functional update so a concurrent QuestionnaireItem onChange
+        // typed while we were awaiting doesn't get silently overwritten.
+        setAnswers((prev) => {
+          const next = { ...prev };
+          for (const [linkId, { value }] of Object.entries(filled)) {
+            next[linkId] = value;
+          }
+          return next;
+        });
+        // Only the linkId -> define name mapping needs to persist for the badge.
+        setPrepopFilledLinks(
+          Object.fromEntries(Object.entries(filled).map(([k, v]) => [k, v.define]))
+        );
+      }
+    } catch (e) {
+      // AbortError means invalidatePrepop() cancelled us -- state is
+      // already cleared by that helper, so drop through without
+      // touching anything. For any other error, only surface it if
+      // we're still the latest request (else it belongs to a
+      // superseded call and would clobber the current one's state).
+      if (e?.name === 'AbortError') return;
+      if (prepopReqRef.current === myReq) {
+        setPrepop({ ok: false, json: { error: e.message } });
+      }
+    } finally {
+      // Release the abort controller slot if this request still owns
+      // it (invalidatePrepop nulls it out on cancellation).
+      if (prepopAbortRef.current === controller) {
+        prepopAbortRef.current = null;
+      }
+      // Only clear loading if we're still the latest request; a newer
+      // in-flight kickoff (or the identity-change effect / invalidate
+      // path) will manage the flag itself, and clobbering it here
+      // would mask that request's progress state.
+      if (prepopReqRef.current === myReq) {
+        setPrepopLoading(false);
+      }
+    }
   };
 
   const indicator = card?.indicator || 'info';
@@ -815,7 +1208,25 @@ export default function EhrDashboard() {
           {PATIENT_SCENARIOS.map((s) => (
             <button
               key={s.id}
-              onClick={() => setScenarioId(s.id)}
+              onClick={() => {
+                // Only invalidate when the scenario is actually
+                // changing. Re-clicking the already-active card
+                // must not clear the prepop results panel / badges
+                // (which would leave the questionnaire fields filled
+                // with values that have no visible provenance).
+                if (scenarioId !== s.id) invalidatePrepop();
+                // Also supersede any in-flight fetchEpicTestPatient
+                // -- otherwise its late resolution would call
+                // setScenarioId('epic-patient') and revert this
+                // deliberate non-Epic selection. The supersession
+                // also means that fetch's finally won't clear
+                // epicLoading (ref !== myReq), so clear it here or
+                // every Epic sandbox button stays permanently
+                // disabled until page reload.
+                epicFetchReqRef.current += 1;
+                setEpicLoading(false);
+                setScenarioId(s.id);
+              }}
               className={`text-left p-3 rounded-lg border-2 transition-all ${
                 scenarioId === s.id
                   ? `${s.borderColor} bg-white shadow-md`
@@ -885,7 +1296,7 @@ export default function EhrDashboard() {
         <select
           className="border border-gray-300 p-2 rounded w-full mb-4 text-gray-800"
           value={planType}
-          onChange={(e) => setPlanType(e.target.value)}
+          onChange={(e) => { invalidateOrderContext(); setPlanType(e.target.value); }}
         >
           <option value="COMM-PPO">Commercial PPO</option>
           <option value="COMM-HMO">Commercial HMO</option>
@@ -897,7 +1308,7 @@ export default function EhrDashboard() {
         <select
           className={`border border-gray-300 p-2 rounded w-full mb-3 text-gray-800 ${trimmedCustom ? 'opacity-40' : ''}`}
           value={selectedIndex}
-          onChange={(e) => setSelectedIndex(Number(e.target.value))}
+          onChange={(e) => { invalidateOrderContext(); setSelectedIndex(Number(e.target.value)); }}
           disabled={Boolean(trimmedCustom)}
         >
           {ORDER_OPTIONS.map((o, i) => (
@@ -919,14 +1330,14 @@ export default function EhrDashboard() {
           <input
             type="text"
             value={customCode}
-            onChange={(e) => setCustomCode(e.target.value)}
+            onChange={(e) => { invalidateOrderContext(); setCustomCode(e.target.value); }}
             placeholder="e.g. 27447, J9145, 99213"
             className="border border-gray-300 p-2 rounded flex-1 text-gray-800 font-mono"
           />
           {customCode && (
             <button
               type="button"
-              onClick={() => setCustomCode('')}
+              onClick={() => { invalidateOrderContext(); setCustomCode(''); }}
               className="text-sm text-gray-500 hover:text-gray-800 px-2"
               aria-label="Clear custom code"
             >
@@ -1018,7 +1429,8 @@ export default function EhrDashboard() {
                   <button
                     key={i}
                     onClick={launchDtr}
-                    className="bg-indigo-600 text-white px-5 py-2.5 rounded font-bold hover:bg-indigo-700 shadow flex items-center gap-2"
+                    disabled={loading}
+                    className="bg-indigo-600 text-white px-5 py-2.5 rounded font-bold hover:bg-indigo-700 shadow flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span className="text-sm bg-white text-indigo-700 px-1.5 py-0.5 rounded font-mono">SMART</span>
                     ► {l.label}
@@ -1187,6 +1599,77 @@ export default function EhrDashboard() {
               </button>
             </div>
 
+            {scenarioId === 'epic-patient' && (
+              <div className="mb-5 bg-teal-50 border border-teal-300 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <div className="text-xs uppercase tracking-widest text-teal-700 font-semibold">
+                      DTR pre-population via CQL against Epic FHIR
+                    </div>
+                    <div className="text-xs text-teal-800 mt-1">
+                      Runs the <code className="bg-white px-1 rounded">MRIBrainPrepopulation</code> ELM library against a Patient + Condition + Observation Bundle fetched from Epic (real live in production if scopes are granted, canned in mock modes). Demographic defines are auto-mapped to matching questionnaire items; the clinical define is shown below.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={runCqlPrepop}
+                    disabled={prepopLoading}
+                    className="bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white text-sm font-semibold px-3 py-1.5 rounded shrink-0 ml-2"
+                  >
+                    {prepopLoading ? 'Evaluating…' : 'Pre-populate from Epic via CQL'}
+                  </button>
+                </div>
+                {prepop && (
+                  prepop.ok ? (
+                    <div className="mt-2 text-xs">
+                      <div className="text-teal-700 mb-2">
+                        mode <span className="font-mono">{prepop.json.mode}</span> · library <span className="font-mono">{prepop.json.libraryId}</span> · pulled {prepop.json.bundleSummary?.totalEntries || 0} resource{prepop.json.bundleSummary?.totalEntries === 1 ? '' : 's'} from Epic
+                        {prepop.json.bundleSummary?.byResourceType && (
+                          <span className="ml-1">({Object.entries(prepop.json.bundleSummary.byResourceType).map(([k, v]) => `${v} ${k}`).join(', ')})</span>
+                        )}
+                      </div>
+                      <table className="w-full text-xs bg-white rounded border border-teal-200">
+                        <thead className="bg-teal-100 text-teal-800">
+                          <tr>
+                            <th className="text-left px-2 py-1">CQL define</th>
+                            <th className="text-left px-2 py-1">Evaluated value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(prepop.json.results || {}).map(([k, v]) => (
+                            <tr key={k} className="border-t border-teal-100">
+                              <td className="px-2 py-1 font-mono text-teal-900">{k}</td>
+                              <td className="px-2 py-1 text-gray-800">
+                                {typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v ?? '')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {Object.keys(prepopFilledLinks).length > 0 ? (
+                        <div className="mt-2 text-teal-700">
+                          Auto-populated {Object.keys(prepopFilledLinks).length} questionnaire item{Object.keys(prepopFilledLinks).length === 1 ? '' : 's'} below.
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-gray-600">
+                          No demographic items in this questionnaire matched the heuristic; the CQL results above are informational only. A questionnaire with items labeled &ldquo;first name&rdquo; / &ldquo;family name&rdquo; / &ldquo;birth date&rdquo; / &ldquo;gender&rdquo; would prefill from the values above.
+                        </div>
+                      )}
+                      {(prepop.json.warnings || []).length > 0 && (
+                        <div className="mt-2 text-amber-700">
+                          Epic returned partial data: {prepop.json.warnings.map((w) => `${w.resourceType} (HTTP ${w.status})`).join(', ')}. Non-fetched types evaluate to no-match in the CQL results above.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-red-700">
+                      Error: {prepop.json?.error || `HTTP ${prepop.status}`}
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
             <form onSubmit={submitPas} className="space-y-5">
               {(questionnaire.item || []).map((item) => (
                 <QuestionnaireItem
@@ -1196,6 +1679,7 @@ export default function EhrDashboard() {
                   onChange={(v) =>
                     setAnswers((prev) => ({ ...prev, [item.linkId]: v }))
                   }
+                  cqlPrefillDefine={prepopFilledLinks[item.linkId]}
                 />
               ))}
               <button
@@ -1441,7 +1925,7 @@ export default function EhrDashboard() {
 }
 
 // ---- QuestionnaireItem ----------------------------------------------------
-function QuestionnaireItem({ item, value, onChange }) {
+function QuestionnaireItem({ item, value, onChange, cqlPrefillDefine }) {
   const hasCqlPrePop = !!item.extension?.find((e) =>
     (e.url || '').includes('initialExpression')
   );
@@ -1453,11 +1937,18 @@ function QuestionnaireItem({ item, value, onChange }) {
     </label>
   );
 
-  const badge = hasCqlPrePop && (
-    <div className="flex items-center gap-2 text-sm mb-2">
-      <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs font-semibold border border-green-200">
-        Auto-populated via CQL ({item.extension.find((e) => (e.url || '').includes('initialExpression')).valueExpression.expression})
-      </span>
+  const badge = (hasCqlPrePop || cqlPrefillDefine) && (
+    <div className="flex items-center gap-2 text-sm mb-2 flex-wrap">
+      {hasCqlPrePop && (
+        <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs font-semibold border border-green-200">
+          Auto-populated via CQL ({item.extension.find((e) => (e.url || '').includes('initialExpression')).valueExpression.expression})
+        </span>
+      )}
+      {cqlPrefillDefine && (
+        <span className="bg-teal-100 text-teal-800 px-2 py-0.5 rounded text-xs font-semibold border border-teal-300">
+          Prefilled from live CQL: {cqlPrefillDefine}
+        </span>
+      )}
     </div>
   );
 

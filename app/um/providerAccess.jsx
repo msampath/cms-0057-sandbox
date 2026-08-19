@@ -4,6 +4,7 @@ import useSWR from 'swr';
 import { apiUrl } from '@/lib/basePath';
 import { authedFetch, getDemoToken, decodeJwtPayload } from '@/lib/smartClient';
 import { PATIENT_LIST } from '@/lib/patients';
+import { OPTUM_SANDBOX_MEMBER_LIST } from '@/lib/optumSandboxMembers';
 
 const NPI_OPTIONS = [
   { npi: '1234567890', label: 'NPI 1234567890 — Ada Smith, MD' },
@@ -24,16 +25,27 @@ export default function ProviderAccessPanel() {
   const [expandedPatient, setExpandedPatient] = useState(null);
   const [optumResult, setOptumResult] = useState(null);
   const [optumLoading, setOptumLoading] = useState(false);
+  const [optumSource, setOptumSource] = useState('sandbox');
+  const [optumSandboxMemberId, setOptumSandboxMemberId] = useState(OPTUM_SANDBOX_MEMBER_LIST[0].id);
   const [optumPatientId, setOptumPatientId] = useState(PATIENT_LIST[0].id);
 
   const checkOptum = async () => {
     setOptumResult(null);
+    setExportKickoff(null);
+    setExportManifest(null);
+    setExportDownload(null);
     setOptumLoading(true);
     try {
+      // npi is threaded through so the log entry appears in the
+      // NPI-scoped panel above -- /api/provider-access filters by
+      // entry.npi and would otherwise drop this event.
+      const payload = optumSource === 'sandbox'
+        ? { source: 'sandbox', sandboxMemberId: optumSandboxMemberId, npi }
+        : { source: 'demo', patientId: optumPatientId, npi };
       const res = await fetch(apiUrl('/api/optum/provider-member-match'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientId: optumPatientId })
+        body: JSON.stringify(payload)
       });
       const json = await res.json();
       setOptumResult({ ok: res.ok, status: res.status, json });
@@ -42,6 +54,97 @@ export default function ProviderAccessPanel() {
     }
     setOptumLoading(false);
   };
+
+  // ---- Bulk export chain state (steps 2 & 3 chain off step 1's jobId
+  // and the manifest's fileName; groupId defaults to the matched group
+  // id from the member-match response) ----
+  const [exportGroupId, setExportGroupId] = useState('provider-matched-group-001');
+  const [exportKickoff, setExportKickoff] = useState(null);
+  const [exportManifest, setExportManifest] = useState(null);
+  const [exportDownload, setExportDownload] = useState(null);
+  const [exportBusy, setExportBusy] = useState(null); // 'kickoff' | 'status' | 'download' | null
+
+  const runKickoff = async () => {
+    setExportBusy('kickoff');
+    setExportKickoff(null);
+    setExportManifest(null);
+    setExportDownload(null);
+    try {
+      const res = await fetch(apiUrl('/api/optum/export/kickoff'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId: exportGroupId })
+      });
+      const json = await res.json();
+      setExportKickoff({ ok: res.ok, status: res.status, json });
+    } catch (e) {
+      setExportKickoff({ ok: false, json: { error: e.message } });
+    }
+    setExportBusy(null);
+  };
+
+  const runStatusPoll = async () => {
+    const jobId = exportKickoff?.json?.jobId;
+    if (!jobId) return;
+    setExportBusy('status');
+    setExportManifest(null);
+    setExportDownload(null);
+    try {
+      const res = await fetch(apiUrl(`/api/optum/export/status/${encodeURIComponent(jobId)}`));
+      const json = await res.json();
+      setExportManifest({ ok: res.ok, status: res.status, json });
+    } catch (e) {
+      setExportManifest({ ok: false, json: { error: e.message } });
+    }
+    setExportBusy(null);
+  };
+
+  const runDownload = async (fileUrl) => {
+    // Two URL shapes to handle:
+    //   Live:  .../R4/{payerId}/{lob}/download/Group/{fileName}/$davinci-data-export
+    //   Mock:  mock://{fileName}
+    // We only care about {fileName} because the download route rebuilds
+    // the full Optum URL from the payerId/lob configured server-side.
+    // Strip the trailing operation suffix first, then take the last
+    // path segment.
+    const url = (fileUrl || '').replace(/\/\$davinci-data-export\/?$/, '');
+    const fileName = url.split('/').pop() || 'Patient_file_1.ndjson';
+    setExportBusy('download');
+    setExportDownload(null);
+    try {
+      const res = await fetch(apiUrl(`/api/optum/export/download/${encodeURIComponent(fileName)}`));
+      const json = await res.json();
+      setExportDownload({ ok: res.ok, status: res.status, json });
+    } catch (e) {
+      setExportDownload({ ok: false, json: { error: e.message } });
+    }
+    setExportBusy(null);
+  };
+
+  // When the SUBMITTED subject actually lands in MatchedMembers,
+  // capture the group id so the export panel's groupId defaults to it
+  // -- ties the two flows into one story. Mere presence of a
+  // MatchedMembers group is not enough: the mock (and Optum's canned
+  // live response) always returns all three groups populated, so we
+  // must check the submitted subject's identifier or name against the
+  // group's contained[] Patients.
+  const matchedGroupId = (() => {
+    const params = optumResult?.json?.response?.parameter || [];
+    const g = params.find((p) => p.name === 'MatchedMembers');
+    if (!g?.resource?.id) return null;
+    const subjIdent = optumResult?.json?.subject?.identifier || '';
+    const subjName = optumResult?.json?.subject?.name || '';
+    const contained = g.resource.contained || [];
+    const hasSubject = contained.some((c) => {
+      const ids = (c?.identifier || []).map((i) => i?.value || '').join(' ');
+      const nm = `${(c?.name?.[0]?.given || []).join(' ')} ${c?.name?.[0]?.family || ''}`.trim();
+      return (
+        (subjIdent && ids.includes(subjIdent)) ||
+        (subjName && nm.toLowerCase() === subjName.trim().toLowerCase())
+      );
+    });
+    return hasSubject ? g.resource.id : null;
+  })();
 
   const { data, isLoading } = useSWR(
     queried ? apiUrl(`/api/provider-access?npi=${encodeURIComponent(queried)}`) : null,
@@ -92,21 +195,48 @@ export default function ProviderAccessPanel() {
           Optum real Provider Access ($bulk-member-match)
         </div>
         <p className="text-xs text-gray-400 mb-3">
-          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access attribution concept — Optum&apos;s own Da Vinci PDex bulk member-match, alongside this sandbox&apos;s own panel above. Optum&apos;s sandbox holds its own unrelated test members, so a demo patient landing in <span className="font-mono">NonMatchedMembers</span> is the expected, honest outcome — it still proves a real request reached a real payer implementation and got a real verdict back.
+          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access concept — Optum&apos;s own Da Vinci PDex multi-member-match. Two source choices below make two different points: submitting an Optum sandbox member returns them in <span className="font-mono">MatchedMembers</span> (their sandbox&apos;s canned data recognizes those exact demographics); submitting one of this sandbox&apos;s own demo patients does not — Optum&apos;s roster does not know them — which is the honest outcome and still proves the request reached a real implementation.
         </p>
+
         <div className="flex gap-2 flex-wrap items-end mb-3">
-          <div className="flex-1 min-w-56">
-            <label className="text-xs text-gray-400 block mb-1">Demo patient to submit</label>
+          <div className="min-w-40">
+            <label className="text-xs text-gray-400 block mb-1">Source</label>
             <select
-              value={optumPatientId}
-              onChange={(e) => setOptumPatientId(e.target.value)}
+              value={optumSource}
+              onChange={(e) => setOptumSource(e.target.value)}
               className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
             >
-              {PATIENT_LIST.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} — {p.planName} (subscriber {p.subscriberId})</option>
-              ))}
+              <option value="sandbox">Sandbox members (Optum&apos;s own)</option>
+              <option value="demo">This sandbox&apos;s demo patients</option>
             </select>
           </div>
+          {optumSource === 'sandbox' ? (
+            <div className="flex-1 min-w-56">
+              <label className="text-xs text-gray-400 block mb-1">Optum sandbox member</label>
+              <select
+                value={optumSandboxMemberId}
+                onChange={(e) => setOptumSandboxMemberId(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+              >
+                {OPTUM_SANDBOX_MEMBER_LIST.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="flex-1 min-w-56">
+              <label className="text-xs text-gray-400 block mb-1">Demo patient to submit</label>
+              <select
+                value={optumPatientId}
+                onChange={(e) => setOptumPatientId(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+              >
+                {PATIENT_LIST.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} — {p.planName} (subscriber {p.subscriberId})</option>
+                ))}
+              </select>
+            </div>
+          )}
           <button
             onClick={checkOptum}
             disabled={optumLoading}
@@ -122,53 +252,73 @@ export default function ProviderAccessPanel() {
               <>
                 <div className="text-xs text-violet-300 mb-2">
                   mode: <span className="font-mono">{optumResult.json.mode}</span>
-                  {optumResult.json.patient && (
+                  {optumResult.json.subject && (
                     <span className="ml-2">
-                      submitted: <span className="font-semibold text-violet-200">{optumResult.json.patient.name}</span>
+                      submitted: <span className="font-semibold text-violet-200">{optumResult.json.subject.name}</span>
+                      <span className="ml-1 text-violet-400">({optumResult.json.source})</span>
                     </span>
                   )}
                 </div>
                 {(() => {
                   const params = optumResult.json?.response?.parameter || [];
                   const groups = ['MatchedMembers', 'NonMatchedMembers', 'ConsentConstrainedMembers'];
-                  const patientName = optumResult.json?.patient?.name || '';
-                  const subscriberId = optumResult.json?.patient?.subscriberId || '';
-                  // Match on the full name (not just family name) so a
-                  // coincidental last-name hit against Optum's unrelated
-                  // canned test members (e.g. "John Michael Doe") does not
-                  // read as a false match for "Jane Doe".
+                  const source = optumResult.json?.source;
+                  const subjName = optumResult.json?.subject?.name || '';
+                  const subjIdent = optumResult.json?.subject?.identifier || '';
+                  // Match by contained Patient identifier/name. Sandbox
+                  // members carry an EMR-XXXXX identifier that Optum
+                  // echoes verbatim in the response; demo patients carry
+                  // a BCBSIL subscriber id that Optum's roster does not
+                  // know, so no group's contained patients will match.
                   const groupInfo = groups.map((name) => {
                     const group = params.find((p) => p.name === name);
+                    const contained = group?.resource?.contained || [];
                     const members = group?.resource?.member || [];
-                    const containsOurPatient = members.some((m) => {
-                      const text = `${m?.entity?.display || ''} ${m?.entity?.reference || ''}`;
+                    const containsOurSubject = contained.some((c) => {
+                      const ids = (c?.identifier || []).map((i) => i?.value || '').join(' ');
+                      const nm = (c?.name?.[0]?.given || []).join(' ') + ' ' + (c?.name?.[0]?.family || '');
                       return (
-                        (patientName && text.toLowerCase().includes(patientName.toLowerCase())) ||
-                        (subscriberId && text.includes(subscriberId))
+                        (subjIdent && ids.includes(subjIdent)) ||
+                        (subjName && nm.trim().toLowerCase() === subjName.trim().toLowerCase())
                       );
                     });
-                    return { name, members, containsOurPatient };
+                    return { name, contained, members, containsOurSubject };
                   });
-                  const anyMatchFound = groupInfo.some((g) => g.containsOurPatient);
+                  const anyMatchFound = groupInfo.some((g) => g.containsOurSubject);
                   return (
                     <>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        {groupInfo.map(({ name, members, containsOurPatient }) => (
+                        {groupInfo.map(({ name, contained, members, containsOurSubject }) => (
                           <div
                             key={name}
-                            className={`bg-gray-900 rounded border p-2 ${containsOurPatient ? 'border-emerald-500 ring-1 ring-emerald-500/50' : 'border-gray-700'}`}
+                            className={`bg-gray-900 rounded border p-2 ${containsOurSubject ? 'border-emerald-500 ring-1 ring-emerald-500/50' : 'border-gray-700'}`}
                           >
                             <div className="text-xs font-semibold text-violet-300 mb-1">{name}</div>
-                            <div className="text-xs text-gray-400">{members.length} member{members.length !== 1 ? 's' : ''}</div>
-                            {containsOurPatient && (
-                              <div className="text-xs text-emerald-400 mt-1">{patientName} appears here</div>
+                            <div className="text-xs text-gray-400">
+                              {contained.length} contained · {members.length} member{members.length !== 1 ? 's' : ''}
+                            </div>
+                            {contained.length > 0 && (
+                              <div className="text-[11px] text-gray-500 mt-1 space-y-0.5">
+                                {contained.slice(0, 3).map((c) => (
+                                  <div key={c.id} className="truncate">
+                                    {(c?.name?.[0]?.given || []).join(' ')} {c?.name?.[0]?.family} — <span className="font-mono">{c?.identifier?.[0]?.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {containsOurSubject && (
+                              <div className="text-xs text-emerald-400 mt-1">Our subject appears here</div>
                             )}
                           </div>
                         ))}
                       </div>
                       {!anyMatchFound && (
                         <div className="text-xs text-gray-500 mt-2">
-                          {patientName} does not appear in any of Optum&apos;s returned groups — their sandbox test data is unrelated to our demo patients, so an unrecognized identity is the expected outcome, effectively a real <span className="font-mono">NonMatchedMembers</span> verdict for this patient.
+                          {source === 'demo' ? (
+                            <>{subjName} does not appear in any of Optum&apos;s returned groups — their sandbox roster is unrelated to this sandbox&apos;s demo patients. That is the honest outcome, effectively a real <span className="font-mono">NonMatchedMembers</span> verdict for this patient.</>
+                          ) : (
+                            <>Submitted subject not found in the response&apos;s contained patients — try the other sandbox member.</>
+                          )}
                         </div>
                       )}
                     </>
@@ -180,6 +330,131 @@ export default function ProviderAccessPanel() {
                     {JSON.stringify(optumResult.json, null, 2)}
                   </pre>
                 </details>
+
+                {/* Three-step $davinci-data-export chain, gated on a
+                    successful member-match so the groupId default flows
+                    from step 0 into step 1. Same story continues: match
+                    members -> bulk-export the matched group. */}
+                {matchedGroupId && (
+                  <div className="mt-4 bg-violet-950/50 border border-violet-700 rounded p-3">
+                    <div className="text-xs uppercase tracking-widest text-violet-400 mb-2">
+                      Bulk export chain ($davinci-data-export)
+                    </div>
+                    <p className="text-[11px] text-gray-400 mb-3">
+                      Da Vinci PDex async export: kick off for a matched group → poll for a manifest of NDJSON files → download one file&apos;s contents. Live behavior against Optum&apos;s sandbox is unverified from this session; mock mode replays the OAS example verbatim so the flow runs with zero credentials.
+                    </p>
+
+                    {/* Step 1 -- kickoff */}
+                    <div className="mb-3">
+                      <div className="text-xs text-violet-300 font-semibold mb-1">Step 1 — kickoff</div>
+                      <div className="flex gap-2 items-end flex-wrap">
+                        <div className="flex-1 min-w-56">
+                          <label className="text-[11px] text-gray-500 block mb-0.5">groupId</label>
+                          <input
+                            type="text"
+                            value={exportGroupId}
+                            onChange={(e) => setExportGroupId(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 font-mono"
+                          />
+                        </div>
+                        <button
+                          onClick={runKickoff}
+                          disabled={exportBusy === 'kickoff'}
+                          className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded"
+                        >
+                          {exportBusy === 'kickoff' ? 'Kicking off…' : 'POST $davinci-data-export'}
+                        </button>
+                        {matchedGroupId && matchedGroupId !== exportGroupId && (
+                          <button
+                            onClick={() => setExportGroupId(matchedGroupId)}
+                            className="text-[11px] text-violet-400 underline"
+                          >
+                            use matched group id
+                          </button>
+                        )}
+                      </div>
+                      {exportKickoff && (
+                        <div className="text-[11px] text-gray-400 mt-1">
+                          {exportKickoff.ok ? (
+                            <>
+                              HTTP {exportKickoff.json.status || exportKickoff.status} · mode <span className="font-mono">{exportKickoff.json.mode}</span> · jobId <span className="font-mono text-violet-300">{exportKickoff.json.jobId || '(none)'}</span> · Content-Location <span className="font-mono text-violet-300 truncate inline-block max-w-md align-bottom">{exportKickoff.json.contentLocation || '(none)'}</span>
+                            </>
+                          ) : (
+                            <span className="text-red-400">Error: {exportKickoff.json?.error || `HTTP ${exportKickoff.status}`}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step 2 -- status */}
+                    <div className="mb-3">
+                      <div className="text-xs text-violet-300 font-semibold mb-1">Step 2 — poll status</div>
+                      <button
+                        onClick={runStatusPoll}
+                        disabled={!exportKickoff?.json?.jobId || exportBusy === 'status'}
+                        className="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-1 rounded"
+                      >
+                        {exportBusy === 'status' ? 'Polling…' : 'GET $bulk-member-match-status'}
+                      </button>
+                      {exportManifest && (
+                        <div className="text-[11px] text-gray-400 mt-1">
+                          {exportManifest.ok ? (
+                            <>
+                              HTTP {exportManifest.json.status || exportManifest.status} · mode <span className="font-mono">{exportManifest.json.mode}</span> · {exportManifest.json.response?.output?.length || 0} output file(s) · {exportManifest.json.response?.error?.length || 0} error file(s)
+                            </>
+                          ) : (
+                            <span className="text-red-400">Error: {exportManifest.json?.error || `HTTP ${exportManifest.status}`}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step 3 -- download */}
+                    <div>
+                      <div className="text-xs text-violet-300 font-semibold mb-1">Step 3 — download NDJSON</div>
+                      {(exportManifest?.json?.response?.output || []).length === 0 ? (
+                        <div className="text-[11px] text-gray-500">Poll the manifest first.</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {exportManifest.json.response.output.map((f) => (
+                            <button
+                              key={f.url}
+                              onClick={() => runDownload(f.url)}
+                              disabled={exportBusy === 'download'}
+                              className="block bg-violet-800/60 hover:bg-violet-700 disabled:opacity-40 text-violet-100 text-[11px] font-mono px-2 py-1 rounded text-left"
+                            >
+                              {f.type} — {f.url}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {exportDownload && (
+                        <div className="mt-2">
+                          {exportDownload.ok ? (
+                            <>
+                              <div className="text-[11px] text-gray-400">
+                                mode <span className="font-mono">{exportDownload.json.mode}</span> · {exportDownload.json.resources?.length || 0} resource(s) parsed
+                              </div>
+                              <div className="mt-1 space-y-0.5">
+                                {(exportDownload.json.resources || []).slice(0, 5).map((r, i) => (
+                                  <div key={i} className="text-[11px] text-emerald-300 font-mono truncate">
+                                    {r.resourceType} · {(r.name?.[0]?.given || []).join(' ')} {Array.isArray(r.name?.[0]?.family) ? r.name?.[0]?.family?.join(' ') : r.name?.[0]?.family} · {r.gender} · {r.birthDate}
+                                  </div>
+                                ))}
+                              </div>
+                              <details className="mt-1">
+                                <summary className="text-[11px] text-gray-500 cursor-pointer hover:text-gray-300">Show raw NDJSON</summary>
+                                <pre className="text-[11px] text-gray-400 bg-gray-950 rounded p-2 mt-1 overflow-x-auto max-h-48">{exportDownload.json.rawNdjson}</pre>
+                              </details>
+                            </>
+                          ) : (
+                            <div className="text-xs text-red-400">Error: {exportDownload.json?.error || `HTTP ${exportDownload.status}`}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="text-sm text-red-400">

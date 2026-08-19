@@ -88,7 +88,7 @@ The sandbox plugs into public health-IT test tools without special configuration
 - SMART App Launcher → `/ehr` as a launched SMART app (public-client PKCE, verified end to end)
 - Availity clearinghouse → live X12 270/271 eligibility check fires at order-sign time, real Availity Coverages API
 - Inferno by ONC → the four FHIR APIs for conformance testing
-- Epic on FHIR sandbox → SMART on FHIR launch (working), plus a Backend Services client that reads Epic's own test patients live via an RS384-signed assertion against a published JWKS
+- Epic on FHIR sandbox → SMART on FHIR launch (working), plus a Backend Services client that reads Epic's own test patients live via an RS384-signed assertion against a published JWKS, and a DTR pre-population path that pulls Patient + Condition + Observation from Epic and runs a real CQL/ELM library against it to fill in questionnaire answers (in-process via `cql-execution`, since Epic's sandbox has no CQL endpoint)
 - Optum real payer API → a second, independent payer's own CRD → DTR → PAS chain plus Provider Access $bulk-member-match, live and verified against a real UnitedHealthcare-shaped implementation
 
 Setup and current status for each is in [docs/integrations.md](docs/integrations.md).

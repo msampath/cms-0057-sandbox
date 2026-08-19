@@ -12,6 +12,8 @@
     "screenshots": "node scripts/captureScreenshots.mjs"
   },
   "dependencies": {
+    "cql-exec-fhir": "^2.1.6",
+    "cql-execution": "^3.3.2",
     "next": "^14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
