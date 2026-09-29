@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { PRIOR_PLAN_HISTORY } from '@/lib/patients';
 import { buildEob, CARIN_PROFILES } from '@/lib/eob';
-import { PAS_PROFILES } from '@/lib/fhir';
+import {
+  PAS_PROFILES,
+  REVIEW_ACTIONS,
+  REVIEW_REASONS,
+  reviewAdjudication
+} from '@/lib/fhir';
 import { requireScopes } from '@/lib/auth';
 
 const REQUIRED_SCOPES = [
@@ -14,8 +19,10 @@ const REQUIRED_SCOPES = [
  * Prior plan history for a matched member, returned as a FHIR searchset
  * Bundle: one prior-plan Coverage (status cancelled, period.end =
  * disenrollment), one ClaimResponse per prior authorization
- * (use: preauthorization, preAuthRef/preAuthPeriod, denials via error[]
- * and processNote), and one CARIN BB ExplanationOfBenefit per claim row.
+ * (use: preauthorization, preAuthRef/preAuthPeriod, the PAS reviewAction
+ * extension on addItem.adjudication carrying the X12 306 action and 886
+ * reason, appeal rights in processNote), and one CARIN BB
+ * ExplanationOfBenefit per claim row.
  *
  * In production this payload would be retrieved via bulk FHIR ($export on
  * the Group returned after $member-match), and prior authorizations would
@@ -26,7 +33,6 @@ const REQUIRED_SCOPES = [
  */
 
 const CLAIM_TYPE = 'http://terminology.hl7.org/CodeSystem/claim-type';
-const ADJUDICATION = 'http://terminology.hl7.org/CodeSystem/adjudication';
 const CPT = 'http://www.ama-assn.org/go/cpt';
 
 function priorPaToClaimResponse(pa, patientId, priorPayer) {
@@ -38,6 +44,17 @@ function priorPaToClaimResponse(pa, patientId, priorPayer) {
   }
   if (pa.appealRights) notes.push(`Appeal rights: ${pa.appealRights}`);
 
+  const approved = pa.status === 'approved';
+  const reason = Object.values(REVIEW_REASONS).find((r) => r.code === pa.denialCode);
+  const review = approved
+    ? { action: REVIEW_ACTIONS.certified, number: pa.authNumber }
+    : {
+        action: REVIEW_ACTIONS.notCertified,
+        number: pa.authNumber,
+        reason,
+        reasonText: pa.denialReason || 'Denied by prior payer.'
+      };
+
   const cr = {
     resourceType: 'ClaimResponse',
     id: `prior-pa-${pa.authNumber.toLowerCase()}`,
@@ -48,39 +65,23 @@ function priorPaToClaimResponse(pa, patientId, priorPayer) {
     patient: { reference: `Patient/${patientId}` },
     created: `${pa.decisionDate}T12:00:00Z`,
     insurer: { display: priorPayer },
-    outcome: pa.status === 'approved' ? 'complete' : 'error',
+    outcome: 'complete',
     disposition: pa.description,
     preAuthRef: pa.authNumber,
     addItem: [
       {
+        itemSequence: [1],
         productOrService: {
           coding: [{ system: CPT, code: pa.serviceCode }],
           text: pa.description
         },
-        adjudication: [
-          { category: { coding: [{ system: ADJUDICATION, code: 'submitted' }] } }
-        ]
+        adjudication: [reviewAdjudication(review)]
       }
     ]
   };
 
   if (pa.expiryDate) {
     cr.preAuthPeriod = { start: pa.decisionDate, end: pa.expiryDate };
-  }
-  if (pa.status !== 'approved') {
-    cr.error = [
-      {
-        code: {
-          coding: [
-            {
-              system: 'urn:payer:prior:denial-code',
-              code: pa.denialCode || 'DENIED'
-            }
-          ],
-          text: pa.denialReason || 'Denied by prior payer.'
-        }
-      }
-    ];
   }
   if (notes.length) {
     cr.processNote = notes.map((text, i) => ({

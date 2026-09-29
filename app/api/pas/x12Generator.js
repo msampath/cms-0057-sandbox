@@ -209,22 +209,52 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode, isProductio
   return { x12, mappings: maps, trn, controlNum };
 }
 
-export function generateX12_278_Response({ receiverId, authNumber }) {
+/**
+ * X12 278 response for a clinical determination. The decision rides in HCR
+ * (HCR01 action code from Code Source 306, HCR03 reason code from External
+ * Code Source 886). AAA is for request validation errors, so it does not
+ * appear on a decision.
+ *   A1 certified     → HCR*A1*<cert #> + REF*BB
+ *   A3 not certified → HCR*A3**<886 reason>
+ *   A4 pended        → HCR*A4
+ * A request that fails validation gets no decision. It returns AAA with a
+ * reject reason (Code Source 901) and follow-up action C (correct and
+ * resubmit) instead of HCR:
+ *   AAA              → AAA*N**<901 reason>*C
+ */
+const RESPONSE_CONTROL = { A1: 2, A3: 3, A4: 4, AAA: 5 };
+
+export function generateX12_278_Response({ receiverId, authNumber, action = 'A1', reasonCode = '' }) {
   const yyMMdd = new Date().toISOString().slice(2, 10).replace(/-/g, '');
   const ccyymmdd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const control = RESPONSE_CONTROL[action] || 2;
+  const isaControl = String(control).padStart(9, '0');
+
+  const decision =
+    action === 'A1'
+      ? [`HCR*A1*${authNumber}`, `REF*BB*${authNumber}`]
+      : action === 'A3'
+        ? [`HCR*A3**${reasonCode}`]
+        : action === 'AAA'
+          ? [`AAA*N**${reasonCode}*C`]
+          : [`HCR*${action}`];
+
+  const txn = [
+    `ST*278*0001*005010X217`,
+    `BHT*0007*11*RESP-${Date.now().toString().slice(-8)}*${ccyymmdd}*1200*18`,
+    `HL*1**20*1`,
+    ...decision
+  ];
+  // SE01 counts every segment from ST through SE inclusive.
+  txn.push(`SE*${txn.length + 1}*0001`);
+
   return (
     [
-      `ISA*00*          *00*          *ZZ*${receiverId.padEnd(15)}*ZZ*PROVIDER001    *${yyMMdd}*1200*^*00501*000000002*0*T*:`,
-      `GS*HI*${receiverId}*PROVIDER001*${ccyymmdd}*1200*2*X*005010X217`,
-      `ST*278*0001*005010X217`,
-      `BHT*0007*11*RESP-${Date.now().toString().slice(-8)}*${ccyymmdd}*1200*18`,
-      `HL*1**20*1`,
-      `AAA*Y*0*A1*N`,
-      `HCR*A1*${authNumber}`,
-      `REF*BB*${authNumber}`,
-      `SE*8*0001`,
-      `GE*1*2`,
-      `IEA*1*000000002`
+      `ISA*00*          *00*          *ZZ*${receiverId.padEnd(15)}*ZZ*PROVIDER001    *${yyMMdd}*1200*^*00501*${isaControl}*0*T*:`,
+      `GS*HI*${receiverId}*PROVIDER001*${ccyymmdd}*1200*${control}*X*005010X217`,
+      ...txn,
+      `GE*1*${control}`,
+      `IEA*1*${isaControl}`
     ].join('~\n') + '~'
   );
 }

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { apiUrl } from '@/lib/basePath';
 import { PATIENT_LIST, PAYER_NAME, PRIOR_PLAN_HISTORY } from '@/lib/patients';
 import { authedFetch } from '@/lib/smartClient';
+import { readReviewAction } from '@/lib/fhir';
 
 // System scopes the requesting payer presents to the prior payer — the
 // union of what member-match and the history endpoint require.
@@ -111,7 +112,7 @@ export default function P2PExchangePanel() {
     <div className="flex flex-col gap-4">
       {/* Regulation banner */}
       <div className="bg-indigo-950/50 border border-indigo-700 rounded p-3 text-xs text-indigo-200">
-        <span className="font-bold text-indigo-300">45 CFR 156.221(c) — Payer-to-Payer API (effective Jan 1, 2027)</span>
+        <span className="font-bold text-indigo-300">45 CFR 156.222(b) — Payer-to-Payer API (effective Jan 1, 2027)</span>
         <span className="text-indigo-400 ml-2">
           New payer sends <code className="bg-indigo-900 px-1 rounded">POST /Patient/$member-match</code> to prior payer with a
           system-scoped Bearer token from <code className="bg-indigo-900 px-1 rounded">/api/auth/token</code>. Prior payer returns a matched member ID.
@@ -208,9 +209,9 @@ function HistoryStep({ bundle }) {
           Prior authorizations (ClaimResponse, use=preauthorization)
         </div>
         {priorPas.map((cr) => {
-          const approved = cr.outcome === 'complete';
+          const review = readReviewAction(cr);
+          const approved = review?.actionCode === 'A1';
           const serviceCoding = cr.addItem?.[0]?.productOrService?.coding?.[0];
-          const denial = cr.error?.[0]?.code;
           return (
             <div
               key={cr.id}
@@ -232,11 +233,13 @@ function HistoryStep({ bundle }) {
                 {' · '}Decided {cr.created?.slice(0, 10)}
                 {cr.preAuthPeriod?.end && <> {' · '}Valid through {cr.preAuthPeriod.end}</>}
               </div>
-              {denial && (
+              {!approved && review && (
                 <div className="text-red-300 mt-1">
-                  Denial: {denial.text}
-                  {denial.coding?.[0]?.code && (
-                    <code className="ml-1 bg-red-900 px-1 rounded">{denial.coding[0].code}</code>
+                  Denial: {review.reasonText || review.reasonDisplay}
+                  {review.reasonCode && (
+                    <code className="ml-1 bg-red-900 px-1 rounded" title={`X12 886: ${review.reasonDisplay}`}>
+                      {review.reasonCode}
+                    </code>
                   )}
                 </div>
               )}

@@ -4,16 +4,16 @@ const REPO_URL = 'https://github.com/msampath/cms-0057-sandbox';
 
 const REG_FACTS = [
   { label: 'Final rule', value: 'CMS-0057-F' },
-  { label: 'Regulation', value: '45 CFR 156.221' },
+  { label: 'Regulation', value: '45 CFR 156.221-156.223' },
   { label: 'API compliance date', value: 'January 1, 2027' },
   { label: 'Operational provisions', value: 'January 1, 2026' }
 ];
 
 const API_MAP = [
-  { cite: '156.221(d)', api: 'Prior Authorization API (CRD → DTR → PAS)', where: '/ehr + /um Live Traffic Feed' },
+  { cite: '156.223', api: 'Prior Authorization API (CRD → DTR → PAS)', where: '/ehr + /um Live Traffic Feed' },
   { cite: '156.221(a)', api: 'Patient Access API', where: '/patient' },
-  { cite: '156.221(b)', api: 'Provider Access API', where: '/um Provider Access tab' },
-  { cite: '156.221(c)', api: 'Payer-to-Payer API ($member-match)', where: '/um P2P Exchange tab' }
+  { cite: '156.222(a)', api: 'Provider Access API', where: '/um Provider Access tab' },
+  { cite: '156.222(b)', api: 'Payer-to-Payer API ($member-match)', where: '/um P2P Exchange tab' }
 ];
 
 const START_PATH = [
@@ -109,6 +109,9 @@ export default function Landing() {
                 <code className="text-slate-400 text-xs">{row.where}</code>
               </div>
             ))}
+          </div>
+          <div className="text-xs text-slate-500 mt-3">
+            45 CFR sections shown are for QHP issuers. Parallel sections: MA 42 CFR 422.119, 422.121, 422.122 · Medicaid 42 CFR 431.60, 431.61, 431.80 · CHIP 42 CFR 457.730, 457.731, 457.732.
           </div>
         </div>
 

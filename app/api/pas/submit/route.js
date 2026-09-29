@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction, addPendingRequest } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
-import { PAS_PROFILES, wrapPasResponseBundle } from '@/lib/fhir';
+import {
+  PAS_PROFILES,
+  REVIEW_ACTIONS,
+  REVIEW_REASONS,
+  X12_REJECT_REASONS,
+  claimResponseItems,
+  pasErrorClaimResponse,
+  wrapPasResponseBundle
+} from '@/lib/fhir';
 import { reviewWindow } from '@/lib/pendedReview';
 import {
   generateX12_278,
@@ -12,7 +20,7 @@ import {
 /**
  * PAS submit endpoint.
  *
- * Accepts a FHIR `Bundle` (type=transaction). The Bundle is preserved
+ * Accepts a FHIR `Bundle` (type=collection, per the PAS request Bundle profile). The Bundle is preserved
  * unaltered (Da Vinci PAS "unaltered FHIR Bundle" strategy) and a
  * parallel X12 278 projection is generated for the legacy adjudication
  * engine. Both are emitted to the UM live feed together so the field-to-
@@ -82,6 +90,35 @@ export async function POST(request) {
     { patientId: patient?.id || 'unknown' }
   );
 
+  // Validation error: without a Claim and a Patient there is nothing to
+  // adjudicate. This is the only path that uses outcome 'error' and the
+  // X12 AAA segment. Clinical decisions go through HCR below.
+  if (!claim || !patient) {
+    const missing = [!claim && 'Claim', !patient && 'Patient'].filter(Boolean).join(' and ');
+    const rejectReason = X12_REJECT_REASONS.requiredDataMissing;
+    const receiverId = getReceiverId('BCBSIL');
+
+    logTransaction('PAS Gateway', 'X12 278 RESPONSE (VALIDATION ERROR)',
+      `Request rejected before adjudication. AAA*N, reason ${rejectReason.code} ${rejectReason.display}. Bundle has no ${missing}.\n\n${generateX12_278_Response({
+        receiverId,
+        action: 'AAA',
+        reasonCode: rejectReason.code
+      })}`,
+      { patientId: patient?.id || 'unknown' }
+    );
+
+    return NextResponse.json(
+      wrapPasResponseBundle([
+        pasErrorClaimResponse({
+          patientId: patient?.id || 'unknown',
+          insurer: 'BCBSIL',
+          reason: rejectReason,
+          text: `PAS request Bundle has no ${missing} entry.`
+        })
+      ])
+    );
+  }
+
   const db = getDb();
   const rules = planType ? db.rules.filter((r) => ruleMatchesPlan(r, planType)) : db.rules;
   const rule = findRule(rules, orderedCode, serviceCategory);
@@ -111,23 +148,17 @@ export async function POST(request) {
   if (bundle._simulateDenial) {
     const authNumber = `DENY${Date.now().toString().slice(-7)}`;
     const receiverId = getReceiverId(vendor);
+    const reason = REVIEW_REASONS.notMedicallyNecessary;
 
-    const x12Denial = [
-      `ISA*00*          *00*          *ZZ*${receiverId.padEnd(15)}*ZZ*PROVIDER001    *${new Date().toISOString().slice(2, 10).replace(/-/g, '')}*1200*^*00501*000000003*0*T*:`,
-      `GS*HI*${receiverId}*PROVIDER001*${new Date().toISOString().slice(0, 10).replace(/-/g, '')}*1200*3*X*005010X217`,
-      `ST*278*0001*005010X217`,
-      `BHT*0007*11*DENY-${Date.now().toString().slice(-8)}*${new Date().toISOString().slice(0, 10).replace(/-/g, '')}*1200*18`,
-      `HL*1**20*1`,
-      `AAA*N*A4*A1*Y`,
-      `HCR*NA`,
-      `REF*9F*${authNumber}`,
-      `SE*8*0001`,
-      `GE*1*3`,
-      `IEA*1*000000003`
-    ].join('~\n') + '~';
+    const x12Denial = generateX12_278_Response({
+      receiverId,
+      authNumber,
+      action: REVIEW_ACTIONS.notCertified.code,
+      reasonCode: reason.code
+    });
 
     logTransaction('Legacy UM Mainframe', 'X12 278 RESPONSE (DENIAL)',
-      `Decision: DENIED. Reason: AAA*N*A4. Not medically necessary.\n\n${x12Denial}`,
+      `Decision: DENIED. HCR*A3, reason ${reason.code} ${reason.display}.\n\n${x12Denial}`,
       { patientId: patient?.id || 'unknown' }
     );
 
@@ -139,24 +170,17 @@ export async function POST(request) {
       type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
       use: 'preauthorization',
       patient: { reference: `Patient/${patient?.id || 'unknown'}` },
-      outcome: 'error',
+      created: new Date().toISOString(),
+      outcome: 'complete',
       disposition: `Prior Authorization Denied by ${vendor}. Service does not meet clinical criteria for medical necessity.`,
       preAuthRef: authNumber,
       insurer: { display: vendor },
-      reviewAction: {
-        actionCode: [{ coding: [{ system: 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes', code: 'deny', display: 'Deny' }] }],
-        reasonCode: [{
-          coding: [{ system: 'https://x12.org/codes/AAA', code: 'A4', display: 'Not medically necessary' }],
-          text: `The requested service (${orderedCode || 'service'}) does not meet ${vendor} clinical criteria for medical necessity. Functional impairment or clinical indication documentation submitted is insufficient under policy MED-0472. Appeal rights apply within 60 days of this determination.`
-        }]
-      },
-      error: [{
-        code: {
-          coding: [{ system: 'https://x12.org/codes/AAA', code: 'A4', display: 'Not medically necessary' }],
-          text: 'Not medically necessary'
-        },
-        expression: ['Claim.item[0]']
-      }]
+      item: claimResponseItems(claim, {
+        action: REVIEW_ACTIONS.notCertified,
+        number: authNumber,
+        reason,
+        reasonText: `The requested service (${orderedCode || 'service'}) does not meet ${vendor} clinical criteria for medical necessity. Functional impairment or clinical indication documentation submitted is insufficient under policy MED-0472. Appeal rights apply within 60 days of this determination.`
+      })
     };
 
     const deniedAction = {
@@ -183,7 +207,7 @@ export async function POST(request) {
       { patientId: patient?.id || 'unknown' }
     );
     logTransaction('PAS Translator', 'FHIR RESPONSE (DENIAL)',
-      `ClaimResponse: outcome=error, reviewAction.actionCode=deny, X12 AAA A4 — Not medically necessary. Appeal period: 60 days.`,
+      `ClaimResponse: outcome=complete, reviewAction A3 Not Certified, reason ${reason.code} ${reason.display} (X12 886). Appeal period: 60 days.`,
       { patientId: patient?.id || 'unknown' }
     );
 
@@ -206,15 +230,27 @@ export async function POST(request) {
       type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
       use: 'preauthorization',
       patient: { reference: `Patient/${patient?.id || 'unknown'}` },
-      outcome: 'queued',
-      disposition: 'Prior authorization request is pending clinical review. Standard decision timeline: 7 calendar days.',
+      created: new Date().toISOString(),
+      // PAS binds outcome to complete | error | partial. A pend is a
+      // completed adjudication whose review action is A4.
+      outcome: 'complete',
+      disposition: 'Prior authorization request is pending clinical review for functional impairment determination. Standard decision timeline: 7 calendar days.',
       preAuthRef: authNumber,
       insurer: { display: vendor },
-      reviewAction: {
-        actionCode: [{ coding: [{ system: 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes', code: 'pend' }] }],
-        reasonCode: [{ coding: [{ system: 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes', code: 'clinical-review-required' }], text: 'Clinical documentation review required for functional impairment determination' }]
-      }
+      item: claimResponseItems(claim, {
+        action: REVIEW_ACTIONS.pended,
+        number: authNumber
+      })
     };
+
+    logTransaction('Legacy UM Mainframe', 'X12 278 RESPONSE (PENDED)',
+      `Decision: PENDED. HCR*A4. Auth # ${authNumber}.\n\n${generateX12_278_Response({
+        receiverId: getReceiverId(vendor),
+        authNumber,
+        action: REVIEW_ACTIONS.pended.code
+      })}`,
+      { patientId: patient?.id || 'unknown' }
+    );
 
     // Request-driven review clock: the decision becomes due after the
     // review window and is finalized by the next poll of
@@ -227,6 +263,8 @@ export async function POST(request) {
       vendor,
       patientId: patient?.id || 'unknown',
       orderedCode,
+      // Kept so the final ClaimResponse echoes the same item sequences.
+      claimItems: (claim?.item || []).map((it) => ({ sequence: it.sequence })),
       decideAfter: Date.now() + reviewWindow(),
     });
 
@@ -264,10 +302,15 @@ export async function POST(request) {
     type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
     use: 'preauthorization',
     patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+    created: new Date().toISOString(),
     outcome: 'complete',
     disposition: `Prior Authorization Approved by ${vendor}.`,
     preAuthRef: authNumber,
-    insurer: { display: vendor }
+    insurer: { display: vendor },
+    item: claimResponseItems(claim, {
+      action: REVIEW_ACTIONS.certified,
+      number: authNumber
+    })
   };
 
   const satisfiedAction = {

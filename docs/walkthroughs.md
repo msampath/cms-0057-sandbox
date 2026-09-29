@@ -14,7 +14,7 @@ The DTR pane fetches the bound FHIR Questionnaire, renders `item[]` dynamically,
 
 For the pended path, switch to **Robert Chen (MA-PPO)** and order `15820` (blepharoplasty). The 2026 grids list that code on the Medicare Advantage list only, which is why the scenario runs under the MA plan. The EHR shows an amber pending state, and the determination finalizes on the first poll after the eight second review window elapses (`lib/pendedReview.js`). The feed shows the full sequence: `BUNDLE RECEIVED` → `PA PENDED` → `PA APPROVED (pended → finalized)` → `REST-HOOK NOTIFICATION`.
 
-For the denial path, check **simulate denial** before submitting any PA-required order. The ClaimResponse returns `outcome: error` with a structured reason code (X12 AAA `A4`) and appeal language, which the operational provisions of the rule require of real denials.
+For the denial path, check **simulate denial** before submitting any PA-required order. The ClaimResponse returns `outcome: complete` with the PAS review action `A3` (not certified), X12 886 reason code `0F`, and appeal language, which the operational provisions of the rule require of real denials.
 
 **Dorothy Hayes (COMM-PPO)** has `27447` (TKA) pre-filled and demonstrates the gold-card exemption: Dr. Patel's NPI is enrolled in the Orthopedic Gold Card program, so PA is auto-satisfied. **Marcus Johnson (COMM-HMO)** demonstrates category-level matching, with an ABA order routed to Lucet.
 
@@ -34,7 +34,7 @@ The panel exchanges client credentials for a system-scoped token and retrieves t
 
 ![P2P exchange with member match and prior plan history](screenshots/08-p2p-exchange.png)
 
-Step 1 sends `POST /Patient/$member-match` with a Parameters body. Step 2 shows the pure Parameters response, and the client reads `MemberIdentifier.valueIdentifier.value` the way a production caller would. Step 3 fetches the prior plan history as a FHIR searchset Bundle: a cancelled prior Coverage, one ClaimResponse per prior authorization (including a denial carried in `error[]` with appeal rights in `processNote`), and CARIN BB EOBs. Jane Doe's prior payer is Aetna and Marcus Johnson's is Cigna, with different histories.
+Step 1 sends `POST /Patient/$member-match` with a Parameters body. Step 2 shows the pure Parameters response, and the client reads `MemberIdentifier.valueIdentifier.value` the way a production caller would. Step 3 fetches the prior plan history as a FHIR searchset Bundle: a cancelled prior Coverage, one ClaimResponse per prior authorization (including a denial carried as review action `A3` with an X12 886 reason code, and appeal rights in `processNote`), and CARIN BB EOBs. Jane Doe's prior payer is Aetna and Marcus Johnson's is Cigna, with different histories.
 
 ## Rule ingestion pipeline (`/um` Rules & Schema tab)
 

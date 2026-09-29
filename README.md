@@ -28,10 +28,12 @@ The payer identity, plan structure, and rule data model a BCBSIL-shaped organiza
 
 | CFR cite | API | Where it lives | Auth |
 |---|---|---|---|
-| 156.221(d) | Prior Authorization API (CRD → DTR → PAS) | `/ehr` + `/um` Live Traffic Feed | open in demo |
+| 156.223 | Prior Authorization API (CRD → DTR → PAS) | `/ehr` + `/um` Live Traffic Feed | open in demo |
 | 156.221(a) | Patient Access API | `/patient` | demo JWT, patient scopes |
-| 156.221(b) | Provider Access API | `/um` Provider Access tab | demo JWT, system scopes |
-| 156.221(c) | Payer-to-Payer API ($member-match + history) | `/um` P2P Exchange tab | demo JWT, system scopes |
+| 156.222(a) | Provider Access API | `/um` Provider Access tab | demo JWT, system scopes |
+| 156.222(b) | Payer-to-Payer API ($member-match + history) | `/um` P2P Exchange tab | demo JWT, system scopes |
+
+The 45 CFR sections above are for QHP issuers. The parallel sections are 42 CFR 422.119, 422.121, 422.122 for MA, 42 CFR 431.60, 431.61, 431.80 for Medicaid, and 42 CFR 457.730, 457.731, 457.732 for CHIP.
 
 The three access APIs enforce SMART-style Bearer tokens issued by a demo token endpoint (`POST /api/auth/token`, discovery at `/api/.well-known/smart-configuration`). Calling them without a token returns a 401 with an OperationOutcome, which the UI can demonstrate live.
 

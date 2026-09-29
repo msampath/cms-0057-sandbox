@@ -10,10 +10,10 @@ A Next.js 14 sandbox simulating the **Da Vinci burden-reduction workflow** (CRD 
 - `/patient` — Patient Access Portal (coverage card, PA history, SMART scopes display)
 
 **All four CMS-0057-F mandated FHIR APIs are now implemented:**
-- PA API (45 CFR 156.221(d)) — CRD → DTR → PAS flow; implemented in earlier sessions
-- Provider Access API (45 CFR 156.221(b)) — `GET /api/provider-access?npi={npi}`; Provider Access tab in `/um`
+- PA API (45 CFR 156.223) — CRD → DTR → PAS flow; implemented in earlier sessions
+- Provider Access API (45 CFR 156.222(a)) — `GET /api/provider-access?npi={npi}`; Provider Access tab in `/um`
 - Patient Access API (45 CFR 156.221(a)) — `GET /api/patient-access?patientId={id}`; `/patient` surface
-- Payer-to-Payer API (45 CFR 156.221(c)) — `POST /api/payer-to-payer/member-match` + `GET /api/payer-to-payer/history/[patientId]`; P2P Exchange tab in `/um`
+- Payer-to-Payer API (45 CFR 156.222(b)) — `POST /api/payer-to-payer/member-match` + `GET /api/payer-to-payer/history/[patientId]`; P2P Exchange tab in `/um`
 
 ## Commands
 
@@ -86,7 +86,7 @@ The response keeps a `{smartScopes, patient, coverage, eobs, events}` envelope r
 
 Two endpoints together simulate the Da Vinci PDex `$member-match` + history exchange. Both require system scopes.
 - `POST /api/payer-to-payer/member-match` — accepts a FHIR Parameters body (`MemberPatient` + `CoverageToMatch`); matches by `subscriberId` first, then by patient ID; returns a **pure Parameters response** with `MemberIdentifier`. No underscore-prefixed convenience fields. The client parses `MemberIdentifier.valueIdentifier.value` to build the history URL.
-- `GET /api/payer-to-payer/history/[patientId]` — returns a **searchset Bundle**: the prior-plan Coverage (with `period.end` at disenrollment), one ClaimResponse per prior PA (`use: preauthorization`, denials carrying `reviewAction` plus `error[]`), and CARIN BB EOBs.
+- `GET /api/payer-to-payer/history/[patientId]` — returns a **searchset Bundle**: the prior-plan Coverage (with `period.end` at disenrollment), one ClaimResponse per prior PA (`use: preauthorization`, the PAS `extension-reviewAction` on `addItem.adjudication` with an X12 306 action code and, for denials, an X12 886 reason code), and CARIN BB EOBs.
 
 The P2P Exchange tab in `/um` drives both calls sequentially and walks the returned Bundle by `resourceType`.
 
@@ -112,6 +112,8 @@ The three access APIs enforce SMART-style Bearer tokens. Not real OAuth, but the
 PAS endpoint receives a FHIR Bundle (Patient + Coverage + Practitioner + Claim + QuestionnaireResponse). The FHIR Bundle is kept as the source of truth, and an X12 278 is generated in parallel as a projection for legacy adjudication. The `/um` translator drawer makes the field-to-segment mappings inspectable in real time.
 
 **Response shape**: all three return sites wrap the result via `wrapPasResponseBundle()` in `lib/fhir.js` — a `Bundle.type = 'collection'` (pinned by the PAS IG, not `transaction-response`) holding the ClaimResponse plus a coverage-information Task, each with a `urn:uuid:` fullUrl. The ClaimResponse carries `meta.profile`. The old `_routedTo` and `_wasPended` convenience fields are gone; the client reads `insurer.display` and sets its own pended ID. `app/api/pas/pended/[id]/route.js` returns `{status, authNumber, vendor, responseBundle}`. `_simulateDenial` survives as a documented demo flag.
+
+**Determination encoding**: every ClaimResponse uses `outcome: 'complete'` (PAS binds outcome to `complete | error | partial`, so `queued` is invalid even for pends). The decision is the PAS `extension-reviewAction` on `item[].adjudication` (or `addItem[].adjudication` in P2P history), built by `claimResponseItems()` / `reviewAdjudication()` in `lib/fhir.js`: X12 306 action `A1` certified, `A3` not certified, `A4` pended, plus an X12 886 reason code on denials. Clients read it with `readReviewAction()`, never from `outcome` or `error[]`. The X12 278 response carries the same decision in `HCR` via `generateX12_278_Response({ action, reasonCode })`, with no `AAA` segment on decisions. The one `outcome: 'error'` path is a real validation failure (Bundle with no Claim or Patient): `pasErrorClaimResponse()` returns an X12 901 reject reason plus `extension-errorFollowupAction`, and the 278 carries `AAA*N**15*C` instead of `HCR`.
 
 ### Rule Ingestion Pipeline (`app/api/extract/`, `app/api/commit-rules/`, `scripts/extractPreIngested.py`)
 

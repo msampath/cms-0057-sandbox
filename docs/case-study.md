@@ -96,7 +96,7 @@ The ratio is the interesting part. Most of my turns were constraints and correct
 
 What I did not delegate: the browser QA, the screenshot pass, and the live endpoint checks. Every defect in the section above came out of one of those. Generated code that looks right and a build that passes lint are not the same as a working demo, and the gap between them is where the interesting failures live.
 
-The regulatory reading was a genuine collaboration. Mapping 45 CFR 156.221 to specific Da Vinci implementation guides, and then to specific profile versions, is the kind of work where a fast reader that cites its sources is useful and a fast reader that does not is dangerous. Every profile canonical URL used here was checked against a published IG rather than accepted from memory, and the ones that could not be confirmed are flagged in `docs/conformance.md`.
+The regulatory reading was a genuine collaboration. Mapping 45 CFR 156.221 through 156.223 to specific Da Vinci implementation guides, and then to specific profile versions, is the kind of work where a fast reader that cites its sources is useful and a fast reader that does not is dangerous. Every profile canonical URL used here was checked against a published IG rather than accepted from memory, and the ones that could not be confirmed are flagged in `docs/conformance.md`.
 
 ---
 

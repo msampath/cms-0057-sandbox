@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
-import { PAS_PROFILES } from '@/lib/fhir';
+import { PAS_PROFILES, readReviewAction } from '@/lib/fhir';
 import {
   getLaunchedSession,
   fetchLaunchedPatient,
@@ -376,6 +376,7 @@ export default function EhrDashboard() {
   const [cqlLibrary, setCqlLibrary] = useState(null);
   const [answers, setAnswers] = useState({});
   const [pasResponse, setPasResponse] = useState(null);
+  const pasReview = readReviewAction(pasResponse);
   const [pendedId, setPendedId] = useState(null);
   const [wasPended, setWasPended] = useState(false);
   const [launchedSession, setLaunchedSession] = useState(null);
@@ -924,7 +925,7 @@ export default function EhrDashboard() {
     if (pasResult.status === 'fulfilled') {
       const data = pasResult.value;
       const { claimResponse, task } = extractPasResponse(data);
-      if (claimResponse?.outcome === 'queued') {
+      if (readReviewAction(claimResponse)?.actionCode === 'A4') {
         setPendedId(claimResponse.preAuthRef);
         setPasResponse(claimResponse);
       } else {
@@ -1367,7 +1368,7 @@ export default function EhrDashboard() {
           />
           <span>
             <strong>Debug:</strong> simulate <code className="text-xs bg-gray-100 px-1 rounded">denial</code> on PAS submit
-            (structured reason codes, CMS-0057-F §1006)
+            (structured reason codes, CMS-0057-F, 45 CFR 156.223)
           </span>
         </label>
 
@@ -1772,41 +1773,50 @@ export default function EhrDashboard() {
         </div>
       )}
 
-      {pasResponse && !pendedId && pasResponse.outcome === 'error' && (
+      {pasResponse && !pendedId && pasReview?.actionCode === 'A3' && (
         <div className="bg-red-50 border-2 border-red-700 text-red-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
           <div className="font-bold text-lg mb-2">✗ {pasResponse.disposition}</div>
-          {(pasResponse.reviewAction?.reasonCode || []).map((rc, i) => {
-            const coding = rc.coding?.[0];
-            return (
-              <div key={i} className="mb-2">
-                <div className="text-sm font-semibold">
-                  Reason code:{' '}
-                  <code className="bg-white px-1 rounded text-red-800">
-                    {coding?.code}
-                  </code>{' '}
-                  <span className="font-normal">— {coding?.display}</span>
-                </div>
-                {rc.text && (
-                  <div className="text-sm mt-1 text-red-800 italic">&ldquo;{rc.text}&rdquo;</div>
-                )}
+          <div className="mb-2">
+            <div className="text-sm font-semibold">
+              Review action:{' '}
+              <code className="bg-white px-1 rounded text-red-800">{pasReview.actionCode}</code>{' '}
+              <span className="font-normal">— {pasReview.actionDisplay} (X12 306)</span>
+            </div>
+            {pasReview.reasonCode && (
+              <div className="text-sm font-semibold">
+                Reason code:{' '}
+                <code className="bg-white px-1 rounded text-red-800">{pasReview.reasonCode}</code>{' '}
+                <span className="font-normal">— {pasReview.reasonDisplay} (X12 886)</span>
               </div>
-            );
-          })}
-          {(pasResponse.error || []).map((err, i) => {
-            const coding = err.code?.coding?.[0];
-            return coding ? (
-              <div key={i} className="text-xs mt-1 text-red-700">
-                X12 AAA: <code className="bg-white px-1 rounded">{coding.code}</code> — {coding.display}
-              </div>
-            ) : null;
-          })}
+            )}
+            {pasReview.reasonText && (
+              <div className="text-sm mt-1 text-red-800 italic">&ldquo;{pasReview.reasonText}&rdquo;</div>
+            )}
+          </div>
           <div className="text-xs mt-3 text-red-700 bg-red-100 px-2 py-1 rounded font-mono">
             Structured denial reason required per CMS-0057-F (effective Jan 1, 2026). Appeal rights apply.
           </div>
         </div>
       )}
 
-      {pasResponse && !pendedId && pasResponse.outcome !== 'error' && (
+      {pasResponse && !pendedId && pasResponse.outcome === 'error' && (
+        <div className="bg-red-50 border-2 border-red-700 text-red-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
+          <div className="font-bold text-lg mb-2">✗ Request rejected before adjudication</div>
+          {(pasResponse.error || []).map((err, i) => {
+            const coding = err.code?.coding?.[0];
+            return (
+              <div key={i} className="text-sm">
+                Reject reason:{' '}
+                <code className="bg-white px-1 rounded text-red-800">{coding?.code}</code>{' '}
+                <span className="font-normal">— {coding?.display} (X12 901)</span>
+                {err.code?.text && <div className="text-sm mt-1 text-red-800 italic">{err.code.text}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {pasResponse && !pendedId && pasReview?.actionCode === 'A1' && (
         <div className="bg-green-50 border-2 border-green-600 text-green-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
           <div className="font-bold text-lg">✓ {pasResponse.disposition}</div>
           <div className="text-sm mt-1">

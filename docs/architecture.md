@@ -20,8 +20,8 @@ flowchart LR
 
   subgraph Access["Access APIs (demo SMART JWTs)"]
     PT["Patient Access<br/>156.221(a)"]
-    PR["Provider Access<br/>156.221(b)"]
-    P2P["Payer-to-Payer<br/>156.221(c)"]
+    PR["Provider Access<br/>156.222(a)"]
+    P2P["Payer-to-Payer<br/>156.222(b)"]
   end
 
   ORD -->|order-sign hook| CRD
@@ -66,7 +66,7 @@ app/
     fhir/metadata/                         CapabilityStatement
     auth/token/                            Demo SMART token endpoint
     .well-known/smart-configuration/       SMART discovery document
-    provider-access/                       Provider Access API (45 CFR 156.221(b))
+    provider-access/                       Provider Access API (45 CFR 156.222(a))
     patient-access/                        Patient Access API (45 CFR 156.221(a))
     payer-to-payer/member-match/           $member-match (Parameters in and out)
     payer-to-payer/history/[patientId]/    Prior plan history (searchset Bundle)

@@ -37,7 +37,7 @@ Each row pairs a demo beat with the competency it demonstrates, phrased from exp
 
 | Demo beat | For healthcare-focused roles | For general TPM / product roles |
 |---|---|---|
-| Regulatory strip on the landing page | I read the final rule and the IGs and scoped the build to what 156.221 actually mandates, including the January 2026 operational provisions versus the January 2027 API dates. | Translating a regulation into a buildable requirements set, with dates and scope boundaries made explicit. |
+| Regulatory strip on the landing page | I read the final rule and the IGs and scoped the build to what 156.221 through 156.223 actually mandate, including the January 2026 operational provisions versus the January 2027 API dates. | Translating a regulation into a buildable requirements set, with dates and scope boundaries made explicit. |
 | Rules Explorer provenance | Payer rules live in PDF grids today. The ingestion pipeline, staging review, and quality gate model the data-governance work payers face before any API can exist. | Data quality gating and provenance as first-class requirements, not afterthoughts. |
 | CDS card and vendor routing | The cascade models gold-carding, code and category matching, and delegated UM vendors (Carelon, Lucet, EviCore), including conditional oncology routing. | Orchestrating a multi-vendor ecosystem behind one interface, with the routing logic in one shared module. |
 | DTR with CQL pre-population | DTR is where burden reduction becomes real for clinicians, and the demo is explicit about what is simulated (CQL is not executed) versus what is spec-shaped. | Being precise in public about what a prototype proves and what it does not. |

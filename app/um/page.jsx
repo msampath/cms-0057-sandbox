@@ -242,7 +242,7 @@ export default function UmDashboard() {
             <div>
               <h2 className="text-lg font-bold text-gray-400">Provider Access API</h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                45 CFR 156.221(b) — Da Vinci PDex IG · SMART on FHIR v2 (backend-services) · Effective Jan 1, 2027
+                45 CFR 156.222(a) — Da Vinci PDex IG · SMART on FHIR v2 (backend-services) · Effective Jan 1, 2027
               </p>
             </div>
             <Link href="/patient" className="text-xs text-blue-400 hover:text-blue-300 underline">
@@ -258,7 +258,7 @@ export default function UmDashboard() {
           <div className="mb-4 shrink-0">
             <h2 className="text-lg font-bold text-gray-400">Payer-to-Payer Exchange</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              45 CFR 156.221(c) — Da Vinci PDex IG ($member-match + bulk FHIR export) · Effective Jan 1, 2027
+              45 CFR 156.222(b) — Da Vinci PDex IG ($member-match + bulk FHIR export) · Effective Jan 1, 2027
             </p>
           </div>
           <P2PExchangePanel />
