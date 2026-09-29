@@ -20,7 +20,6 @@ import {
   pasErrorClaimResponse,
   wrapPasResponseBundle
 } from '@/lib/fhir';
-import { reviewWindow } from '@/lib/pendedReview';
 import { getPatient, PATIENT_LIST } from '@/lib/patients';
 import { buildAttachmentRequestTask, ATTACHMENT_NEEDED } from '@/lib/cdex';
 import { apiBase } from '@/lib/origin';

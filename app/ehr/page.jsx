@@ -328,9 +328,8 @@ function buildClaimResource(scenario, order, expedited = false) {
       {
         sequence: 1,
         productOrService: {
-          coding: order.code === 'NOCODE'
-            ? []
-            : [{ system: billingCodeSystem(order.code), code: order.code }],
+          // No empty arrays in FHIR JSON: a category-only order has text only.
+          ...(order.code === 'NOCODE' ? {} : { coding: [{ system: billingCodeSystem(order.code), code: order.code }] }),
           text: order.category || undefined
         },
         servicedDate: new Date().toISOString().slice(0, 10)
@@ -2338,7 +2337,6 @@ function QuestionnaireItem({ item, value, onChange, cqlPrefillDefine }) {
               checked={!!value}
               onChange={(e) => onChange(e.target.checked)}
               className="w-4 h-4 text-indigo-600 rounded"
-              required={item.required}
             />
             <span>Yes</span>
           </label>
@@ -2353,8 +2351,10 @@ function QuestionnaireItem({ item, value, onChange, cqlPrefillDefine }) {
             type="file"
             onChange={(e) => onChange(e.target.files?.[0]?.name || '')}
             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:border-0 file:bg-indigo-50 file:text-indigo-700 rounded border p-2"
-            required={item.required}
+            // A file already named in the answers (a relaunch) satisfies it.
+            required={item.required && !value}
           />
+          {value && <div className="text-xs text-gray-500 mt-1">Attached: {value}</div>}
         </div>
       );
 

@@ -137,7 +137,12 @@ def extract_pdf(path, kind):
         print(f'cannot open PDF: {e}', file=sys.stderr)
         sys.exit(3)
     with pdf_file as pdf:
-        for pi, page in enumerate(pdf.pages):
+        try:
+            pages = pdf.pages
+        except Exception as e:
+            print(f'cannot read the page tree: {e}', file=sys.stderr)
+            sys.exit(3)
+        for pi, page in enumerate(pages):
             try:
                 words = page.extract_words()
             except Exception as e:

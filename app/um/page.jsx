@@ -355,8 +355,8 @@ export default function UmDashboard() {
                 if (!confirm('Clear the Live Traffic Feed? Rules and schema are untouched.')) return;
                 await fetch(apiUrl('/api/logs/clear'), { method: 'POST' }).catch(() => {});
                 mutateKey(apiUrl('/api/logs'));
-      // Provider Access panels read state the reset cleared.
-      mutateKey((key) => typeof key === 'string' && key.includes('/api/provider-access'));
+                // Provider Access panels read the log that was just cleared.
+                mutateKey((key) => typeof key === 'string' && key.includes('/api/provider-access'));
               }}
               className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1 rounded"
             >

@@ -784,6 +784,13 @@ async function hardening() {
   await post('/api/pas/submit', dxBundle);
   const dxX12 = String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '');
   check('X12 278: Claim.diagnosis → HI*ABK (ICD-10, no decimal), no ICD-9 BK', dxX12.includes('HI*ABK:G43909') && !dxX12.includes('HI*BK:'));
+  const twoDx = pasBundle('70553');
+  twoDx.entry[1].resource.diagnosis = [
+    { sequence: 1, diagnosisCodeableConcept: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'I10' }] } },
+    { sequence: 2, type: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/ex-diagnosistype', code: 'principal' }] }], diagnosisCodeableConcept: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'R51.9' }] } }
+  ];
+  await post('/api/pas/submit', twoDx);
+  check('X12 278: HI*ABK is the principal diagnosis, not the first listed', String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '').includes('HI*ABK:R519'));
 
   console.log('\nSuper-review round 8: CDS Hooks shape, metering, bounds');
   const specHook = (await post('/api/cds-services/order-sign', {
@@ -798,16 +805,28 @@ async function hardening() {
   const draft70553 = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-2', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '70553' }] } } }] };
   const viaPrefetch = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-2', context: { draftOrders: draft70553 }, prefetch: { patient: { resourceType: 'Patient', id: 'pat-8849-jane-doe' } } })).json;
   check('prefetch.patient names the patient when context has no patientId', viaPrefetch?.systemActions?.[0]?.resource?.subject?.reference === 'Patient/pat-8849-jane-doe');
-  const failedPrefetch = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-3', context: { patientId: 'pat-8849-jane-doe', draftOrders: draft70553 }, prefetch: { patient: { resourceType: 'OperationOutcome', id: 'oo1' } } })).json;
-  check('a failed prefetch (OperationOutcome) is ignored and context.patientId is used', failedPrefetch?.systemActions?.[0]?.resource?.subject?.reference === 'Patient/pat-8849-jane-doe');
+  const failedPrefetch = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-3', context: { draftOrders: draft70553 }, prefetch: { patient: { resourceType: 'OperationOutcome', id: 'oo1' } } })).json;
+  check('a failed prefetch (OperationOutcome) never names the patient', failedPrefetch?.systemActions?.[0]?.resource?.subject?.reference === 'Patient/unknown');
+  const bothIds = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-3b', context: { patientId: 'pat-8849-jane-doe', draftOrders: draft70553 }, prefetch: { patient: { resourceType: 'Patient', id: 'pat-7712-robert-chen' } } })).json;
+  check('context.patientId outranks a prefetch Patient with another id', bothIds?.systemActions?.[0]?.resource?.subject?.reference === 'Patient/pat-8849-jane-doe');
   const withCoverage = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-4', context: { patientId: 'pat-8849-jane-doe', draftOrders: draft70553 }, prefetch: { coverage: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'Coverage', id: 'cov-comm-ppo-bcbsil' } }] } } })).json;
   const covRef = (withCoverage?.systemActions?.[0]?.resource?.extension?.[0]?.extension || []).find((e) => e.url === 'coverage')?.valueReference?.reference;
   check('the coverage prefetch names the Coverage', covRef === 'Coverage/cov-comm-ppo-bcbsil', covRef);
   const snomedDraft = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-5', code: { coding: [{ system: 'http://snomed.info/sct', code: '70553' }] } } }] };
   const snomed = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-5', context: { patientId: 'pat-8849-jane-doe', draftOrders: snomedDraft } })).json;
-  check('a draft order coded outside CPT or HCPCS is not matched as a CPT code', snomed?.cards?.[0]?.summary !== 'Prior authorization required', snomed?.cards?.[0]?.summary);
+  const snomedOrder = snomed?.systemActions?.[0]?.resource;
+  check('a draft order coded outside CPT or HCPCS gets the could-not-read card and a conditional answer',
+    snomed?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedOrder, 'pa-needed')?.valueCode === 'conditional', snomed?.cards?.[0]?.summary);
+  const mixedDraft = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'MedicationRequest', id: 'm1' } }, { resource: { resourceType: 'ServiceRequest', id: 'sr-a', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '70553' }] } } }] };
+  const mixedHook = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-7', context: { patientId: 'pat-8849-jane-doe', draftOrders: mixedDraft } })).json;
+  check('the first ServiceRequest among the draft orders is evaluated', mixedHook?.systemActions?.[0]?.resource?.id === 'sr-a' && mixedHook?.cards?.[0]?.summary === 'Prior authorization required');
+  const httpHcpcs = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-h', code: { coding: [{ system: 'http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets', code: 'J0717' }] } } }] };
+  const hcpcs = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-8', context: { patientId: 'pat-8849-jane-doe', draftOrders: httpHcpcs } })).json;
+  check('an HCPCS coding with an http system URI is read', hcpcs?.cards?.[0]?.summary === 'Prior authorization required', hcpcs?.cards?.[0]?.summary);
   const goldByUser = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-spec-6', planType: 'COMM-PPO', context: { userId: 'Practitioner/pract-888-patel', patientId: 'pat-3301-dorothy-hayes', draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-6', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '27447' }] } } }] } } })).json;
   check('context.userId resolves the practitioner NPI (gold card applies)', /gold-card/.test(goldByUser?.cards?.[0]?.summary || ''), goldByUser?.cards?.[0]?.summary);
+  const unknownUser = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-spec-9', planType: 'COMM-PPO', context: { userId: 'Practitioner/nobody', patientId: 'pat-3301-dorothy-hayes', draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-9', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '27447' }] } } }] } } })).json;
+  check('an unknown context.userId gets no gold card', unknownUser?.cards?.[0]?.summary === 'Prior authorization required', unknownUser?.cards?.[0]?.summary);
   const usageOf2 = async (api) => ((await call('/api/metrics')).json?.usage || []).find((u) => u.api === api) || { total: 0, unauthenticated: 0 };
   const beforeBasic = await usageOf2('Patient Access');
   await call('/api/patient-access?patientId=pat-8849-jane-doe', { headers: { authorization: 'Basic eDp5' } });

@@ -114,7 +114,8 @@ export function buildStagedRules(files) {
 }
 
 // Exceptions come from this run only: code rules whose code has no CPT or
-// HCPCS shape, and files that matched no known grid pattern.
+// HCPCS shape. Files that matched no grid pattern are reported by
+// /api/extract as EXTRACT errors.
 export function buildExceptions(rules, files) {
   const out = [];
   const badCodes = rules.filter((r) => r.match_type === 'code' && !/^(\d{5}|\d{4}[A-Z]|[A-Z]\d{4})$/.test(String(r.service_code || '')));

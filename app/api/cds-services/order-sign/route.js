@@ -140,7 +140,8 @@ function buildCoverageInformationAction({
   goldCard,
   categoryDefault,
   hardStop,
-  orderId
+  orderId,
+  unreadableOrder
 }) {
   // pa-needed mapping:
   //   no-PA rule           → 'no-auth'
@@ -154,6 +155,8 @@ function buildCoverageInformationAction({
       ? 'covered'
       : hardStop
       ? 'not-covered'
+      : unreadableOrder
+      ? 'conditional'
       : !rule && categoryDefault
       ? categoryDefault.default_rule?.covered || 'covered'
       : rule?.managed_by === 'Carelon-or-BCBSIL-conditional' && !routing.reason
@@ -191,8 +194,10 @@ async function handlePOST(request) {
     .map((e) => e?.resource)
     .find((r) => r?.resourceType === 'ServiceRequest') || null;
   const draftOrderId = typeof draftOrder?.id === 'string' ? draftOrder.id : null;
-  const BILLING_SYSTEMS = ['http://www.ama-assn.org/go/cpt', 'https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets'];
-  const draftCode = (Array.isArray(draftOrder?.code?.coding) ? draftOrder.code.coding : []).find((c) => BILLING_SYSTEMS.includes(c?.system))?.code;
+  // CPT or HCPCS, whether the client writes the system with http or https.
+  const BILLING_SYSTEMS = ['www.ama-assn.org/go/cpt', 'www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets'];
+  const schemeless = (v) => (typeof v === 'string' ? v.replace(/^https?:\/\//, '') : '');
+  const draftCode = (Array.isArray(draftOrder?.code?.coding) ? draftOrder.code.coding : []).find((c) => BILLING_SYSTEMS.includes(schemeless(c?.system)))?.code;
   // The sandbox EHR sends code and patientId at the top level. A CDS Hooks
   // client sends them in context (draftOrders, patientId) and prefetch.
   const orderedCode = str(body.code) || str(body.serviceCode) || str(draftCode);
@@ -201,7 +206,6 @@ async function handlePOST(request) {
   // A prefetch that failed arrives as an OperationOutcome, so only a real
   // Patient is used. context.patientId outranks the prefetch.
   const prefetchPatient = body.prefetch?.patient?.resourceType === 'Patient' ? body.prefetch.patient : null;
-  const patient = body.patient || body.patientResource || prefetchPatient || null;
   // Ids go into Patient/ and Coverage/ references, so only FHIR ids.
   const fhirId = (v) => (typeof v === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(v) ? v : null);
   const patientId =
@@ -213,6 +217,9 @@ async function handlePOST(request) {
     : null;
   const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || fhirId(prefetchCoverage?.id) || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
+  // A draft order the payer cannot read (no CPT or HCPCS coding) gets no
+  // coverage answer, rather than a "not on the grid" no-auth.
+  const unreadableOrder = !!draftOrder && !orderedCode && !serviceCategory;
   // A CDS Hooks client names the user as context.userId (Practitioner/<id>).
   // The demo practitioners' NPIs come from lib/patients.js.
   const userPractitionerId = typeof body.context?.userId === 'string' ? body.context.userId.replace(/^Practitioner\//, '') : null;
@@ -299,12 +306,21 @@ async function handlePOST(request) {
         }
       ]
     };
+  } else if (unreadableOrder) {
+    card = {
+      summary: 'Ordered code could not be read',
+      indicator: 'warning',
+      detail:
+        'The draft order carries no CPT or HCPCS coding, so the payer could not evaluate it. ' +
+        'Resend the order with a CPT or HCPCS code to get a coverage answer.',
+      source: sourceForRule(rule)
+    };
   } else if (!rule) {
     card = {
       summary: 'Code not on the active PA grid',
       indicator,
       detail:
-        `No matching rule found for **${orderedCode}**` +
+        `No matching rule found for **${orderedCode || 'the ordered service'}**` +
         (serviceCategory ? ` (category: ${serviceCategory})` : '') +
         '. The order may proceed; no payer documentation requested.',
       source: sourceForRule(rule)
@@ -351,6 +367,8 @@ async function handlePOST(request) {
   // ----- Build coverage-information system action -------------------------
   const paNeededValue = goldCard
     ? 'satisfied'
+    : unreadableOrder
+    ? 'conditional'
     : !rule && categoryDefault
     ? categoryDefault.default_rule?.pa_needed || 'no-auth'
     : planDefault
@@ -371,7 +389,8 @@ async function handlePOST(request) {
     categoryDefault,
     // The hard-stop card blocks a non-covered order, so the order says so.
     hardStop: card?.indicator === 'hard-stop',
-    orderId: draftOrderId
+    orderId: draftOrderId,
+    unreadableOrder
   });
 
   // This log line is the visible "machine-readable PA determination" moment

@@ -44,10 +44,31 @@ for (const [name, conditions, expected] of CASES) {
     ]
   }]);
   const result = await new cql.Executor(new cql.Library(elm)).exec(psource);
-  const got = result.patientResults['test-1'].HasRelevantNeuroCondition;
+  const r = result.patientResults['test-1'];
+  const got = r.HasRelevantNeuroCondition;
   const ok = got === expected;
   if (!ok) failures++;
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}: ${got}`);
 }
-console.log(`\n${CASES.length - failures} passed, ${failures} failed`);
+// The demographic defines feed the DTR identity items.
+{
+  const psource = cqlfhir.PatientSource.FHIRv401();
+  psource.loadBundles([{ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: { resourceType: 'Patient', id: 'test-1', name: [{ family: 'Lopez', given: ['Camila', 'Maria'] }], gender: 'female', birthDate: '1987-09-12' } }] }]);
+  const raw = (await new cql.Executor(new cql.Library(elm)).exec(psource)).patientResults['test-1'];
+  // FHIR primitives come back wrapped. lib/cql.js peels them to .value the same way.
+  const unwrap = (x) => { while (x && typeof x === 'object' && 'value' in x) x = x.value; return x; };
+  const r = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, unwrap(v)]));
+  const dob = r.PatientDOB?.toString?.() ?? String(r.PatientDOB);
+  const want = { PatientGivenName: 'Camila', PatientFamilyName: 'Lopez', PatientGender: 'female' };
+  for (const [k, v] of Object.entries(want)) {
+    const ok = r[k] === v;
+    if (!ok) failures++;
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${k}: ${r[k]}`);
+  }
+  const dobOk = dob.startsWith('1987-09-12');
+  if (!dobOk) failures++;
+  console.log(`  ${dobOk ? 'ok  ' : 'FAIL'}  PatientDOB: ${dob}`);
+}
+const total = CASES.length + 4;
+console.log(`\n${total - failures} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);
