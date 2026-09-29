@@ -30,6 +30,8 @@ const KIND_MATCHERS = [
   { re: /commercial.*med.*surg|med.*surg|commercial/i,         kind: 'medsurg', label: 'Commercial Med-Surg' }
 ];
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
 function detectKind(filename) {
   for (const m of KIND_MATCHERS) if (m.re.test(filename)) return m;
   return null;
@@ -47,7 +49,12 @@ export async function POST(request) {
     return NextResponse.json({ error: 'no file uploaded under field "file"' }, { status: 400 });
   }
 
-  const filename = file.name || 'upload.pdf';
+  // Only the base name is used, to pick the grid kind and label the rules.
+  // The file itself is written under a fixed name.
+  const filename = path.basename(String(file.name || 'upload.pdf'));
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: `file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, { status: 413 });
+  }
   const matched = detectKind(filename);
   if (!matched) {
     return NextResponse.json({
@@ -60,70 +67,71 @@ export async function POST(request) {
   // Save to temp file
   const buf = Buffer.from(await file.arrayBuffer());
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-extract-'));
-  const pdfPath = path.join(tmpDir, filename);
-  const outPath = path.join(tmpDir, 'rules.json');
-  fs.writeFileSync(pdfPath, buf);
-
-  const scriptPath = path.join(process.cwd(), 'scripts', 'extractPreIngested.py');
-  if (!fs.existsSync(scriptPath)) {
-    return NextResponse.json({ error: 'scripts/extractPreIngested.py missing' }, { status: 500 });
-  }
-
-  logTransaction(
-    'Ingestion Engine',
-    'LIVE EXTRACT START',
-    `Spawning python extractor for ${filename} (kind=${matched.kind}, ${(buf.length / 1024).toFixed(1)} KB)`
-  );
-
-  let result;
+  const pdfPath = path.join(tmpDir, 'upload.pdf');
   try {
-    result = await runPython(scriptPath, [matched.kind, pdfPath, outPath]);
-  } catch (e) {
-    logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', String(e.message || e));
+    const outPath = path.join(tmpDir, 'rules.json');
+    fs.writeFileSync(pdfPath, buf);
+
+    const scriptPath = path.join(process.cwd(), 'scripts', 'extractPreIngested.py');
+    if (!fs.existsSync(scriptPath)) {
+      return NextResponse.json({ error: 'scripts/extractPreIngested.py missing' }, { status: 500 });
+    }
+
+    logTransaction(
+      'Ingestion Engine',
+      'LIVE EXTRACT START',
+      `Spawning python extractor for ${filename} (kind=${matched.kind}, ${(buf.length / 1024).toFixed(1)} KB)`
+    );
+
+    let result;
+    try {
+      result = await runPython(scriptPath, [matched.kind, pdfPath, outPath]);
+    } catch (e) {
+      logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', String(e.message || e));
+      return NextResponse.json({
+        error: 'failed to run python extractor',
+        hint: 'install Python 3 and pdfplumber: pip install pdfplumber',
+        detail: String(e.message || e)
+      }, { status: 503 });
+    }
+
+    if (result.code !== 0) {
+      logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', `exit ${result.code}: ${result.stderr.slice(0, 300)}`);
+      return NextResponse.json({
+        error: 'extractor exited non-zero',
+        exitCode: result.code,
+        stderr: result.stderr,
+        stdout: result.stdout,
+        hint: result.stderr.includes('pdfplumber') ? 'install pdfplumber: pip install pdfplumber' : undefined
+      }, { status: 500 });
+    }
+
+    if (!fs.existsSync(outPath)) {
+      return NextResponse.json({ error: 'extractor finished but no JSON file produced' }, { status: 500 });
+    }
+
+    const rules = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+    // Tag each rule with source label so the UI can show the per-source group.
+    for (const r of rules) {
+      r.source_file = filename;
+      r.source_label = matched.label;
+    }
+
+    logTransaction(
+      'Ingestion Engine',
+      'LIVE EXTRACT OK',
+      `Extracted ${rules.length} rules from ${filename} via real PDF parse.`
+    );
+
     return NextResponse.json({
-      error: 'failed to run python extractor',
-      hint: 'install Python 3 and pdfplumber: pip install pdfplumber',
-      detail: String(e.message || e)
-    }, { status: 503 });
+      success: true,
+      filename,
+      kind: matched.kind,
+      label: matched.label,
+      count: rules.length,
+      rules
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-
-  if (result.code !== 0) {
-    logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', `exit ${result.code}: ${result.stderr.slice(0, 300)}`);
-    return NextResponse.json({
-      error: 'extractor exited non-zero',
-      exitCode: result.code,
-      stderr: result.stderr,
-      stdout: result.stdout,
-      hint: result.stderr.includes('pdfplumber') ? 'install pdfplumber: pip install pdfplumber' : undefined
-    }, { status: 500 });
-  }
-
-  if (!fs.existsSync(outPath)) {
-    return NextResponse.json({ error: 'extractor finished but no JSON file produced' }, { status: 500 });
-  }
-
-  const rules = JSON.parse(fs.readFileSync(outPath, 'utf8'));
-  // Tag each rule with source label so the UI can show the per-source group.
-  for (const r of rules) {
-    r.source_file = filename;
-    r.source_label = matched.label;
-  }
-
-  logTransaction(
-    'Ingestion Engine',
-    'LIVE EXTRACT OK',
-    `Extracted ${rules.length} rules from ${filename} via real PDF parse.`
-  );
-
-  // Best-effort cleanup
-  try { fs.unlinkSync(pdfPath); fs.unlinkSync(outPath); fs.rmdirSync(tmpDir); } catch {}
-
-  return NextResponse.json({
-    success: true,
-    filename,
-    kind: matched.kind,
-    label: matched.label,
-    count: rules.length,
-    rules
-  });
 }

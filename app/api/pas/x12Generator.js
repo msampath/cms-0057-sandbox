@@ -35,6 +35,12 @@ function pickServiceTypeCode(rule, orderedCode) {
   return 'AR';
 }
 
+// Bundle values go into X12 elements, so the 278 delimiters (~ * : ^) and
+// line breaks are replaced, and non-strings are coerced first.
+export function x12Safe(v) {
+  return String(v ?? '').replace(/[~*:^\r\n]/g, ' ');
+}
+
 function pickEntry(bundle, resourceType) {
   if (!Array.isArray(bundle?.entry)) return null;
   const hit = bundle.entry.find((e) => e?.resource?.resourceType === resourceType);
@@ -44,13 +50,13 @@ function pickEntry(bundle, resourceType) {
 function patientName(p) {
   if (!p?.name?.[0]) return { family: 'DOE', given: 'JANE' };
   return {
-    family: (p.name[0].family || 'UNKNOWN').toUpperCase(),
-    given: (p.name[0].given?.[0] || '').toUpperCase()
+    family: x12Safe(p.name[0].family || 'UNKNOWN').toUpperCase(),
+    given: x12Safe(p.name[0].given?.[0] || '').toUpperCase()
   };
 }
 
 function memberId(coverage, patient) {
-  return (
+  return x12Safe(
     coverage?.subscriberId ||
     coverage?.identifier?.[0]?.value ||
     patient?.id ||
@@ -61,18 +67,20 @@ function memberId(coverage, patient) {
 function primaryIcd10(patient) {
   const cond = patient?.condition?.[0];
   if (!cond) return null;
-  return cond?.code?.coding?.[0]?.code || cond?.code?.text || null;
+  const v = cond?.code?.coding?.[0]?.code || cond?.code?.text || null;
+  return v === null ? null : x12Safe(v);
 }
 
 function servicedDate(claim) {
-  const d = claim?.servicedDate || new Date().toISOString().slice(0, 10);
+  const d = x12Safe(claim?.servicedDate || new Date().toISOString().slice(0, 10));
   return d.replace(/-/g, '');
 }
 
 function npi(practitioner) {
-  return (
-    practitioner?.identifier?.find((i) => /npi/i.test(i.system || ''))?.value ||
-    practitioner?.identifier?.[0]?.value ||
+  const ids = Array.isArray(practitioner?.identifier) ? practitioner.identifier : [];
+  return x12Safe(
+    ids.find((i) => /npi/i.test(String(i?.system || '')))?.value ||
+    ids[0]?.value ||
     '1234567890'
   );
 }
@@ -85,7 +93,8 @@ export function getReceiverId(vendor) {
  * Build X12 278 from the Bundle. Returns:
  *   { x12: <string>, mappings: [{ segment, fhirPath, label, value }, ...] }
  */
-export function generateX12_278({ bundle, rule, vendor, orderedCode, isProduction = false }) {
+export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, isProduction = false }) {
+  const orderedCode = rawCode == null ? rawCode : x12Safe(rawCode);
   const patient = pickEntry(bundle, 'Patient');
   const coverage = pickEntry(bundle, 'Coverage');
   const practitioner = pickEntry(bundle, 'Practitioner');

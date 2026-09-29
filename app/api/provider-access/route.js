@@ -60,7 +60,7 @@ async function handleGET(request) {
     eventCount: p.events.length,
     // Drug PAs as PDex Prior Authorization EOBs (CMS-0062-P removes the
     // CMS-0057-F drug exclusion from Provider Access).
-    priorAuthorizations: drugPriorAuthEobs(p.patientId),
+    priorAuthorizations: drugPriorAuthEobs(p.patientId, { npi }),
   }));
 
   return NextResponse.json({

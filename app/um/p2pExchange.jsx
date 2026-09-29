@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { apiUrl } from '@/lib/basePath';
 import { PATIENT_LIST, PAYER_NAME, PRIOR_PLAN_HISTORY } from '@/lib/patients';
 import { authedFetch } from '@/lib/smartClient';
@@ -45,6 +45,8 @@ function buildMemberMatchRequest(patient) {
 
 export default function P2PExchangePanel() {
   const [patientId, setPatientId] = useState('pat-8849-jane-doe');
+  // Bumped per run and on member switch, so a stale run drops its results.
+  const runRef = useRef(0);
   const [step, setStep] = useState('idle'); // idle | matching | matched | fetching | done | error
   const [matchRequest, setMatchRequest] = useState(null);
   const [matchResponse, setMatchResponse] = useState(null);
@@ -62,6 +64,8 @@ export default function P2PExchangePanel() {
   };
 
   const runExchange = async () => {
+    const myRun = ++runRef.current;
+    const current = () => runRef.current === myRun;
     reset();
     setStep('matching');
 
@@ -75,6 +79,7 @@ export default function P2PExchangePanel() {
         body: JSON.stringify(req),
       });
       const matchData = await res.json();
+      if (!current()) return;
       setMatchResponse(matchData);
 
       // The matched member identifier comes back inside the Parameters
@@ -90,8 +95,9 @@ export default function P2PExchangePanel() {
       }
 
       setStep('fetching');
-      const histRes = await authedFetch(apiUrl(`/api/payer-to-payer/history/${memberIdentifier}`), P2P_SCOPES);
+      const histRes = await authedFetch(apiUrl(`/api/payer-to-payer/history/${encodeURIComponent(memberIdentifier)}`), P2P_SCOPES);
       const histData = await histRes.json();
+      if (!current()) return;
       if (!histRes.ok) {
         setStep('error');
         setError(histData?.issue?.[0]?.diagnostics || `History fetch failed (HTTP ${histRes.status})`);
@@ -100,6 +106,7 @@ export default function P2PExchangePanel() {
       setHistory(histData);
       setStep('done');
     } catch (e) {
+      if (!current()) return;
       setStep('error');
       setError(String(e.message || e));
     }
@@ -130,7 +137,8 @@ export default function P2PExchangePanel() {
             <label className="text-xs text-gray-400 block mb-1">Newly enrolled member</label>
             <select
               value={patientId}
-              onChange={(e) => { setPatientId(e.target.value); reset(); }}
+              disabled={step === 'matching' || step === 'fetching'}
+              onChange={(e) => { runRef.current += 1; setPatientId(e.target.value); reset(); }}
               className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
             >
               {/* Only members who came from a prior plan have history to exchange. */}
@@ -277,9 +285,9 @@ function HistoryStep({ bundle }) {
               <tr key={eob.id} className="border-t border-gray-700">
                 <td className="py-1 pr-3 text-gray-400">{eob.item?.[0]?.servicedDate}</td>
                 <td className="py-1 pr-3 text-gray-200">{eob.item?.[0]?.productOrService?.text}</td>
-                <td className="py-1 pr-3 text-right text-gray-200">${totalBy(eob, 'submitted')?.toLocaleString()}</td>
-                <td className="py-1 pr-3 text-right text-green-300">${totalBy(eob, 'paidtoprovider')?.toLocaleString()}</td>
-                <td className="py-1 text-right text-amber-300">${totalBy(eob, 'memberliability')?.toLocaleString()}</td>
+                <td className="py-1 pr-3 text-right text-gray-200">${totalBy(eob, 'submitted')?.toLocaleString() ?? '-'}</td>
+                <td className="py-1 pr-3 text-right text-green-300">${totalBy(eob, 'paidtoprovider')?.toLocaleString() ?? '-'}</td>
+                <td className="py-1 text-right text-amber-300">${totalBy(eob, 'memberliability')?.toLocaleString() ?? '-'}</td>
               </tr>
             ))}
           </tbody>

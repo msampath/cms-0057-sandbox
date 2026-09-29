@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { beginStandaloneLaunch } from '@/lib/smartLaunch';
 import { BASE_PATH } from '@/lib/basePath';
 
@@ -52,14 +52,24 @@ function clientIdFor(iss, epicVariant) {
 export default function StandaloneLaunchPage() {
   const [message, setMessage] = useState('Starting standalone launch...');
   const [error, setError] = useState(null);
+  const started = useRef(false);
 
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     const params = new URLSearchParams(window.location.search);
     const iss = params.get('iss') || DEFAULT_ISS;
     const epicVariant = params.get('client');
     const redirectUri = `${window.location.origin}${BASE_PATH}/ehr/callback`;
     const clientId = clientIdFor(iss, epicVariant);
-    setMessage(`Discovering ${new URL(iss).host}... (client_id ${clientId.slice(0, 8)}...)`);
+    let host;
+    try {
+      host = new URL(iss).host;
+    } catch {
+      setError('iss is not a valid URL');
+      return;
+    }
+    setMessage(`Discovering ${host}... (client_id ${clientId.slice(0, 8)}...)`);
 
     beginStandaloneLaunch({ iss, redirectUri, clientId })
       .then((authorizeUrl) => {

@@ -19,7 +19,10 @@ const SYSTEM_SCOPES = [
   'system/ClaimResponse.read'
 ];
 
-const fetcher = (url) => authedFetch(url, SYSTEM_SCOPES).then((r) => r.json());
+const fetcher = (url) => authedFetch(url, SYSTEM_SCOPES).then((r) => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 export default function ProviderAccessPanel() {
   const [npi, setNpi] = useState('1234567890');
@@ -148,7 +151,7 @@ export default function ProviderAccessPanel() {
     return hasSubject ? g.resource.id : null;
   })();
 
-  const { data, isLoading } = useSWR(
+  const { data, error, isLoading, mutate } = useSWR(
     queried ? apiUrl(`/api/provider-access?npi=${encodeURIComponent(queried)}`) : null,
     fetcher
   );
@@ -175,7 +178,7 @@ export default function ProviderAccessPanel() {
             </select>
           </div>
           <button
-            onClick={() => { setQueried(npi); setExpandedPatient(null); }}
+            onClick={() => { setQueried(npi); setExpandedPatient(null); if (queried === npi) mutate(); }}
             className="bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold px-4 py-1.5 rounded"
           >
             Retrieve panel
@@ -470,6 +473,12 @@ export default function ProviderAccessPanel() {
       {/* Results */}
       {isLoading && (
         <div className="text-sm text-gray-400">Querying attributed panel…</div>
+      )}
+
+      {error && !isLoading && (
+        <div className="text-sm text-red-300 bg-red-950/40 border border-red-700 rounded p-3">
+          Provider Access request failed ({error.message}). Retrieve the panel again.
+        </div>
       )}
 
       {data && !isLoading && (

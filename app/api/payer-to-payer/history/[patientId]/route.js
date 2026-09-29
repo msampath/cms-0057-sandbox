@@ -100,7 +100,7 @@ async function handleGET(request, { params }) {
   if (denied) return denied;
 
   const { patientId } = params;
-  const history = PRIOR_PLAN_HISTORY[patientId];
+  const history = Object.hasOwn(PRIOR_PLAN_HISTORY, patientId) ? PRIOR_PLAN_HISTORY[patientId] : null;
 
   if (!history) {
     return NextResponse.json(
@@ -157,7 +157,7 @@ async function handleGET(request, { params }) {
   // Prior-payer drug PAs as PDex Prior Authorization EOBs. CMS-0062-P
   // proposes removing the CMS-0057-F drug exclusion from Payer-to-Payer.
   const drugPaEobs = (history.priorDrugPAs || [])
-    .filter((pa) => DRUG_CATALOG[pa.drugKey])
+    .filter((pa) => Object.hasOwn(DRUG_CATALOG, pa.drugKey))
     .map((pa) =>
       buildPriorAuthEob({
         record: {

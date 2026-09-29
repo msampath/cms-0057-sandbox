@@ -38,7 +38,7 @@ async function handleGET(request) {
       { status: 400 }
     );
   }
-  const patientId = PATIENT_ID_BY_SUBSCRIBER[memberId];
+  const patientId = Object.hasOwn(PATIENT_ID_BY_SUBSCRIBER, memberId) ? PATIENT_ID_BY_SUBSCRIBER[memberId] : null;
   if (!patientId) {
     return NextResponse.json(
       { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'not-found', diagnostics: `No member ${memberId}.` }] },

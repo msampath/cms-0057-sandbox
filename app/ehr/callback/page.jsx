@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { completeLaunch } from '@/lib/smartLaunch';
 import { BASE_PATH } from '@/lib/basePath';
 
@@ -14,8 +14,11 @@ import { BASE_PATH } from '@/lib/basePath';
 export default function CallbackPage() {
   const [message, setMessage] = useState('Exchanging authorization code...');
   const [error, setError] = useState(null);
+  const started = useRef(false);
 
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const state = params.get('state');

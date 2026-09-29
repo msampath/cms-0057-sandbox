@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { outboundRateLimit } from '@/lib/rateLimit';
 import { fetchEpicPatient, epicBackendMode } from '@/lib/epicBackend';
 import { logTransaction } from '@/lib/db';
 
@@ -17,6 +18,8 @@ export const dynamic = 'force-dynamic';
  * is 'live' | 'mock-no-credentials' | 'mock-forced' | 'disabled'.
  */
 export async function GET(request) {
+  const limited = outboundRateLimit('Epic');
+  if (limited) return limited;
   const fhirId = request.nextUrl.searchParams.get('id');
   if (!fhirId) {
     return NextResponse.json({ error: 'Query param "id" is required' }, { status: 400 });

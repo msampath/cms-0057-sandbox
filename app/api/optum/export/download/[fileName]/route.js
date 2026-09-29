@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { outboundRateLimit } from '@/lib/rateLimit';
 import { downloadExportFile, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
 
@@ -14,6 +15,8 @@ export const dynamic = 'force-dynamic';
  * can show both the shape and the line-by-line breakdown.
  */
 export async function GET(_request, { params }) {
+  const limited = outboundRateLimit('Optum');
+  if (limited) return limited;
   const { fileName } = params;
   try {
     const result = await downloadExportFile(fileName);

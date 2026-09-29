@@ -21,7 +21,10 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi, planTyp
   // Guards the submit handler's state writes after an unmount (scenario or
   // order switched while PARequest was in flight).
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     let live = true;

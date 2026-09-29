@@ -158,6 +158,12 @@ page.on('response', (r) => {
 });
 
 console.log(`UI smoke against ${BASE}`);
+// Start from the seeded baseline, whatever state the server was left in.
+const startReset = await fetch(`${BASE}/api/demo/reset?mode=seeded`, { method: 'POST' });
+if (!startReset.ok) {
+  console.log(`  FAIL  reset to the seeded baseline -- HTTP ${startReset.status}`);
+  process.exit(1);
+}
 for (const step of STEPS) {
   const label = `${step.path}${step.tab ? ` [${step.tab}]` : ''}${step.selectOrder ? ` (${step.selectOrder})` : ''}${step.name ? ` (${step.name})` : ''}`;
   errors.length = 0;

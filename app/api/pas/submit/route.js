@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb, logTransaction, addPendingRequest, upsertDrugPaRecord } from '@/lib/db';
+import { getDb, logTransaction, addPendingRequest, upsertDrugPaRecord, nextRequestId } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
 import {
   DRUG_BY_HCPCS,
@@ -12,6 +12,7 @@ import {
   REVIEW_ACTIONS,
   REVIEW_REASONS,
   X12_REJECT_REASONS,
+  billingCodeSystem,
   claimResponseItems,
   pasErrorClaimResponse,
   wrapPasResponseBundle
@@ -165,7 +166,7 @@ export async function handlePOST(request) {
   // Drug orders are decided by the shared drug PA model (lib/drugPa.js),
   // the same function the pharmacy (NCPDP) track calls, from the DTR
   // QuestionnaireResponse answers. The result lands in the shared record.
-  const drugKey = DRUG_BY_HCPCS[orderedCode] || null;
+  const drugKey = Object.hasOwn(DRUG_BY_HCPCS, String(orderedCode)) ? DRUG_BY_HCPCS[orderedCode] : null;
 
   // Legal decision clock (lib/decisionClock.js). Expedited when the Claim
   // priority is stat. Logged with each decision so the UM feed can show it.
@@ -181,15 +182,19 @@ export async function handlePOST(request) {
   // QuestionnaireResponse answers, is recorded on the medical track so the EHR card
   // and the record agree, but it does not change the shared determination
   // or answers.
+  const noDrugAnswers = !!drugKey && !(drugAnswers && Object.keys(drugAnswers).length > 0);
   const recordDrugDecision = (authNumber, { forced = false } = {}) => {
     if (!drugKey) return;
     const hasAnswers = !!drugAnswers && Object.keys(drugAnswers).length > 0;
+    const npi =
+      pickEntry(bundle, 'Practitioner')?.identifier?.find((i) => i?.system === 'http://hl7.org/fhir/sid/us-npi')?.value || null;
     const modelDecision = !forced && hasAnswers;
     upsertDrugPaRecord(patient?.id || 'unknown', drugKey, {
       ...(modelDecision ? { answers: drugAnswers, decision: drugDecision } : {}),
       track: 'medical',
       trackData: {
         hcpcs: orderedCode,
+        npi,
         vendor,
         authNumber,
         determination: forced ? 'denied' : drugDecision.determination,
@@ -203,7 +208,7 @@ export async function handlePOST(request) {
   // Denials: the _simulateDenial debug flag from the EHR, or a drug
   // decision that did not meet criteria.
   if (bundle._simulateDenial || drugDecision?.determination === 'denied') {
-    const authNumber = `DENY${Date.now().toString().slice(-7)}`;
+    const authNumber = nextRequestId('DENY');
     const receiverId = getReceiverId(vendor);
     const reason = drugReason ? drugReason.x12 : REVIEW_REASONS.notMedicallyNecessary;
     // A genuine model denial is recorded as such. A debug denial of a
@@ -260,7 +265,7 @@ export async function handlePOST(request) {
         extension: [
           { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
           { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'auth-needed' },
-          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: 'http://www.ama-assn.org/go/cpt', code: orderedCode || '' } },
+          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: billingCodeSystem(orderedCode), code: orderedCode || '' } },
           { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() }
         ]
       }
@@ -285,6 +290,7 @@ export async function handlePOST(request) {
           determination: 'denied',
           planType,
           forced: !!bundle._simulateDenial && drugDecision?.determination !== 'denied',
+          noAnswers: noDrugAnswers,
           receivedAt,
           decidedAt: new Date().toISOString()
         }
@@ -300,7 +306,7 @@ export async function handlePOST(request) {
 
   // Blepharoplasty (15820) always pends — functional impairment review required.
   if (orderedCode === '15820') {
-    const authNumber = `AUTH${Date.now().toString().slice(-7)}`;
+    const authNumber = nextRequestId('AUTH');
 
     const pendedClaimResponse = {
       resourceType: 'ClaimResponse',
@@ -399,7 +405,7 @@ export async function handlePOST(request) {
   // Simulate mainframe latency.
   await new Promise((r) => setTimeout(r, 2500));
 
-  const authNumber = `AUTH${Date.now().toString().slice(-7)}`;
+  const authNumber = nextRequestId('AUTH');
   recordDrugDecision(authNumber);
   const receiverId = getReceiverId(vendor);
   const x12Response = generateX12_278_Response({ receiverId, authNumber });
@@ -445,7 +451,7 @@ export async function handlePOST(request) {
       extension: [
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'satisfied' },
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: 'http://www.ama-assn.org/go/cpt', code: orderedCode || '' } },
+        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: billingCodeSystem(orderedCode), code: orderedCode || '' } },
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() },
         { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#satisfied-pa-id', valueString: authNumber }
       ]
@@ -472,6 +478,7 @@ export async function handlePOST(request) {
         benefit: 'medical',
         determination: 'approved',
         planType,
+        noAnswers: noDrugAnswers,
         receivedAt,
         decidedAt: new Date().toISOString()
       }

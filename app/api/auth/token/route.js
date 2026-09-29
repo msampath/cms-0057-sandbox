@@ -19,14 +19,16 @@ export async function POST(request) {
   const contentType = request.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const body = await request.json().catch(() => ({}));
-    grantType = body.grant_type;
-    scope = body.scope || '';
-    clientId = body.client_id || null;
+    grantType = body?.grant_type;
+    scope = typeof body?.scope === 'string' ? body.scope : '';
+    clientId = typeof body?.client_id === 'string' ? body.client_id : null;
   } else {
     const form = await request.formData().catch(() => null);
     grantType = form?.get('grant_type');
-    scope = form?.get('scope') || '';
-    clientId = form?.get('client_id') || null;
+    const s = form?.get('scope');
+    scope = typeof s === 'string' ? s : '';
+    const c = form?.get('client_id');
+    clientId = typeof c === 'string' ? c : null;
   }
 
   if (grantType !== 'client_credentials') {

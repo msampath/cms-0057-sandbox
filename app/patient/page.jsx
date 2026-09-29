@@ -14,7 +14,10 @@ const PATIENT_SCOPES = [
   'patient/ClaimResponse.read'
 ];
 
-const fetcher = (url) => authedFetch(url, PATIENT_SCOPES).then((r) => r.json());
+const fetcher = (url) => authedFetch(url, PATIENT_SCOPES).then((r) => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 export default function PatientAccess() {
   const [selectedId, setSelectedId] = useState('pat-8849-jane-doe');
@@ -28,8 +31,8 @@ export default function PatientAccess() {
       .catch(() => setTokenClaims(null));
   }, []);
 
-  const { data, isLoading } = useSWR(
-    apiUrl(`/api/patient-access?patientId=${selectedId}`),
+  const { data, error, isLoading } = useSWR(
+    apiUrl(`/api/patient-access?patientId=${encodeURIComponent(selectedId)}`),
     fetcher,
     { refreshInterval: 3000 }
   );
@@ -96,6 +99,11 @@ export default function PatientAccess() {
       </div>
 
       {isLoading && <div className="text-sm text-gray-400">Loading member record…</div>}
+      {error && (
+        <div className="text-sm text-red-300 bg-red-950/40 border border-red-700 rounded p-3 mb-4">
+          Patient Access request failed ({error.message}). Retrying every few seconds.
+        </div>
+      )}
 
       {data && !isLoading && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

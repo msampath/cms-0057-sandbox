@@ -18,7 +18,7 @@ const fetcher = (url) => fetch(url).then((r) => r.json());
  *   - Effective date
  */
 export default function RulesExplorer() {
-  const { data, isLoading } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 2000 });
+  const { data, isLoading } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 15000 });
   const rules = data?.rules || [];
 
   const [query, setQuery] = useState('');
@@ -252,7 +252,7 @@ function RuleDetail({ rule }) {
           <div className="text-[10px] uppercase tracking-widest text-orange-300">Service-specific contact</div>
           <Field label="name" value={rule.contact.name} />
           {rule.contact.phone && <Field label="phone" value={rule.contact.phone} />}
-          {rule.contact.url && <Field label="url" value={<a href={rule.contact.url} className="text-blue-400 underline" target="_blank" rel="noreferrer">{rule.contact.url}</a>} />}
+          {/^https?:\/\//i.test(String(rule.contact.url || '')) && <Field label="url" value={<a href={rule.contact.url} className="text-blue-400 underline" target="_blank" rel="noreferrer">{rule.contact.url}</a>} />}
           {rule.contact.hours && <Field label="hours" value={rule.contact.hours} />}
         </div>
       )}

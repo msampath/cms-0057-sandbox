@@ -1,6 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
-import useSWR from 'swr';
+import useSWR, { mutate as mutateKey } from 'swr';
 import Link from 'next/link';
 import { apiUrl } from '@/lib/basePath';
 import {
@@ -23,10 +23,11 @@ import ClockBadge from '@/app/components/ClockBadge';
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
 export default function UmDashboard() {
-  const { data } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 1000 });
+  const { data } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 2000 });
   // SWR dedupes by key — both this and <RulesExplorer> share the same
-  // cached response, no double fetch.
-  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 2000 });
+  // cached response, no double fetch. The full rule set is large, so it is
+  // polled slowly and revalidated right after a commit, load, or reset.
+  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 15000 });
   const ruleCount = rulesData?.rules?.length ?? 0;
   // One-shot probe: can this host run the Python extractor? Undefined while
   // loading is treated as available so the form does not flash disabled.
@@ -127,7 +128,13 @@ export default function UmDashboard() {
   const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
   const commitRules = async () => {
-    await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(staging.rules) });
+    const res = await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(staging.rules) }).catch(() => null);
+    if (!res?.ok) {
+      const json = await res?.json().catch(() => null);
+      window.alert(`Commit failed: ${json?.error || (res ? `HTTP ${res.status}` : 'network error')}. The staged rules are kept.`);
+      return;
+    }
+    mutateKey(apiUrl('/api/rules'));
     setStaging(null);
     setFiles([]);
   };
@@ -362,6 +369,7 @@ function ResetDemoButton() {
     setBusy(true);
     try {
       await fetch(apiUrl('/api/demo/reset?mode=seeded'), { method: 'POST' });
+      mutateKey(apiUrl('/api/rules'));
     } finally {
       setBusy(false);
     }
@@ -392,6 +400,7 @@ function EmptyStateResetLink() {
     setBusy(true);
     try {
       await fetch(apiUrl('/api/demo/reset?mode=empty'), { method: 'POST' });
+      mutateKey(apiUrl('/api/rules'));
     } finally {
       setBusy(false);
     }
@@ -418,10 +427,16 @@ function PreIngestedButton({ ruleCount = 0 }) {
     }
     setLoading(true);
     setResult(null);
-    const res = await fetch(apiUrl('/api/rules/load-pre-ingested'), { method: 'POST' });
-    const data = await res.json();
-    setResult(data);
-    setLoading(false);
+    try {
+      const res = await fetch(apiUrl('/api/rules/load-pre-ingested'), { method: 'POST' });
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      setResult(res.ok ? data : { error: data?.error || `HTTP ${res.status}` });
+      if (res.ok) mutateKey(apiUrl('/api/rules'));
+    } catch (e) {
+      setResult({ error: e.message || 'network error' });
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <div className="border border-blue-900 bg-blue-950/40 rounded p-3">

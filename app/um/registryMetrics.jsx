@@ -51,7 +51,7 @@ export default function RegistryMetricsPanel() {
   const sendBadToken = async () => {
     await fetch(apiUrl('/api/patient-access?patientId=pat-8849-jane-doe'), {
       headers: { authorization: 'Bearer not-a-valid-token' }
-    });
+    }).catch(() => {});
     mutate();
   };
   const sendGoodCall = async () => {
@@ -60,7 +60,7 @@ export default function RegistryMetricsPanel() {
       'patient/Coverage.read',
       'patient/ExplanationOfBenefit.read',
       'patient/ClaimResponse.read'
-    ]);
+    ]).catch(() => {});
     mutate();
   };
 

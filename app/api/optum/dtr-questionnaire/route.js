@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { outboundRateLimit } from '@/lib/rateLimit';
 import { fetchQuestionnairePackage, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
 
@@ -15,6 +16,8 @@ export const dynamic = 'force-dynamic';
  * pane (which continues to drive the actual PAS submission).
  */
 export async function POST(request) {
+  const limited = outboundRateLimit('Optum');
+  if (limited) return limited;
   let body;
   try {
     body = await request.json();

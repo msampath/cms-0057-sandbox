@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { beginLaunch } from '@/lib/smartLaunch';
 import { BASE_PATH } from '@/lib/basePath';
 
@@ -44,8 +44,11 @@ function clientIdFor(iss) {
 export default function LaunchPage() {
   const [message, setMessage] = useState('Launching...');
   const [error, setError] = useState(null);
+  const started = useRef(false);
 
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     const params = new URLSearchParams(window.location.search);
     const iss = params.get('iss');
     const launch = params.get('launch');

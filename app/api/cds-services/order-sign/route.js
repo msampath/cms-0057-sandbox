@@ -3,6 +3,7 @@ import { getDb, logTransaction } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
 import { DRUG_BY_HCPCS, questionnaireIdForDrug } from '@/lib/drugPa';
 import { withUsage } from '@/lib/withUsage';
+import { billingCodeSystem } from '@/lib/fhir';
 
 /**
  * CDS Hooks 2.0 `order-sign` service.
@@ -65,8 +66,9 @@ function findGoldCardExemption(programs, orderedCode, practitionerNpi) {
   for (const g of programs) {
     if (!g.code_scope?.includes(orderedCode)) continue;
     // If providers list is non-empty, require the practitioner NPI to be
-    // enrolled. If empty, treat as program-wide pilot (still exempted).
-    if (g.providers?.length && practitionerNpi && !g.providers.includes(practitionerNpi)) continue;
+    // enrolled, so a request without an NPI is not exempted. If empty,
+    // treat as program-wide pilot (still exempted).
+    if (g.providers?.length && (!practitionerNpi || !g.providers.includes(practitionerNpi))) continue;
     return g;
   }
   return null;
@@ -132,14 +134,22 @@ function buildCoverageInformationAction({
   orderedCode,
   rule,
   routing,
-  paNeededValue
+  paNeededValue,
+  goldCard,
+  categoryDefault
 }) {
   // pa-needed mapping:
   //   no-PA rule           → 'no-auth'
   //   auth-needed @ Phase 2 → 'auth-needed'
   //   auth-needed @ Phase 4 → 'satisfied' (emitted in pas/submit, not here)
+  // The Task must agree with the card: a gold card is covered, and a
+  // category default carries its own covered value.
   const covered =
-    !rule
+    goldCard
+      ? 'covered'
+      : !rule && categoryDefault
+      ? categoryDefault.default_rule?.covered || 'covered'
+      : !rule
       ? 'not-covered'
       : rule.managed_by === 'Carelon-or-BCBSIL-conditional' && !routing.reason
       ? 'conditional'
@@ -178,7 +188,7 @@ function buildCoverageInformationAction({
         {
           url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode',
           valueCoding: {
-            system: 'http://www.ama-assn.org/go/cpt',
+            system: billingCodeSystem(orderedCode),
             code: orderedCode
           }
         },
@@ -284,7 +294,7 @@ async function handlePOST(request) {
     // Drug codes bind the questionnaire generated from the shared drug PA
     // model, in place of the grid's generic fallback.
     const questId =
-      questionnaireIdForDrug(DRUG_BY_HCPCS[orderedCode]) ||
+      questionnaireIdForDrug(Object.hasOwn(DRUG_BY_HCPCS, String(orderedCode)) ? DRUG_BY_HCPCS[orderedCode] : null) ||
       rule.questionnaire_id ||
       'fallback-medical-necessity';
     const dtrUrl = `/dtr/launch?questionnaire=${encodeURIComponent(questId)}&code=${encodeURIComponent(orderedCode)}`;
@@ -313,8 +323,13 @@ async function handlePOST(request) {
   }
 
   // ----- Build coverage-information system action -------------------------
-  const paNeededValue =
-    !rule || rule.pa_needed === 'no-auth' ? 'no-auth' : 'auth-needed';
+  const paNeededValue = goldCard
+    ? 'satisfied'
+    : !rule && categoryDefault
+    ? categoryDefault.default_rule?.pa_needed || 'no-auth'
+    : !rule || rule.pa_needed === 'no-auth'
+    ? 'no-auth'
+    : 'auth-needed';
 
   const systemAction = buildCoverageInformationAction({
     patientId,
@@ -322,7 +337,9 @@ async function handlePOST(request) {
     orderedCode,
     rule,
     routing,
-    paNeededValue
+    paNeededValue,
+    goldCard,
+    categoryDefault
   });
 
   // This log line is the visible "machine-readable PA determination" moment

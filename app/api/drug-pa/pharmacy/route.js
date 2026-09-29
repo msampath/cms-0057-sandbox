@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { logTransaction, getDrugPaRecord, upsertDrugPaRecord } from '@/lib/db';
+import { getDb, logTransaction, getDrugPaRecord, upsertDrugPaRecord, nextRequestId } from '@/lib/db';
 import { resolvePharmacyRouting } from '@/lib/routing';
 import { DRUG_CATALOG, DRUG_DENIAL_REASONS, decideDrugPa } from '@/lib/drugPa';
 import { decisionClock } from '@/lib/decisionClock';
-import { getPatient } from '@/lib/patients';
+import { getPatient, PATIENT_LIST } from '@/lib/patients';
 import {
   formularyLookup,
   rtpbRequest,
@@ -31,12 +31,27 @@ import { withUsage } from '@/lib/withUsage';
 async function handlePOST(request) {
   const body = await request.json().catch(() => ({}));
   const { step, drugKey, patientId, prescriberNpi = 'unknown', expedited = false } = body;
-  const drug = DRUG_CATALOG[drugKey];
-  if (!drug || !patientId || !['benefit', 'submit'].includes(step)) {
+  const ID = /^[A-Za-z0-9._-]{1,64}$/;
+  const drug = typeof drugKey === 'string' && Object.hasOwn(DRUG_CATALOG, drugKey) ? DRUG_CATALOG[drugKey] : null;
+  if (!drug || typeof patientId !== 'string' || !ID.test(patientId) || !['benefit', 'submit'].includes(step)) {
     return NextResponse.json(
       { error: 'step (benefit|submit), a known drugKey, and patientId are required' },
       { status: 400 }
     );
+  }
+  if (typeof prescriberNpi !== 'string' || !ID.test(prescriberNpi)) {
+    return NextResponse.json({ error: 'prescriberNpi must be an identifier string' }, { status: 400 });
+  }
+  // Configured plans plus the member plans with a clock (Medicaid, QHP).
+  const plans = [...new Set([...(getDb().plans || []).map((p) => p.plan_type), ...PATIENT_LIST.map((p) => p.planType)])];
+  if (body.planType != null && !plans.includes(body.planType)) {
+    return NextResponse.json({ error: `planType must be one of ${plans.join(', ')}` }, { status: 400 });
+  }
+  if (body.answers != null && (typeof body.answers !== 'object' || Array.isArray(body.answers))) {
+    return NextResponse.json({ error: 'answers must be an object' }, { status: 400 });
+  }
+  if (body.caseId != null && (typeof body.caseId !== 'string' || !ID.test(body.caseId))) {
+    return NextResponse.json({ error: 'caseId must be an identifier string' }, { status: 400 });
   }
 
   const { pbm } = resolvePharmacyRouting();
@@ -54,7 +69,7 @@ async function handlePOST(request) {
   const meta = { patientId, npi: prescriberNpi };
 
   if (step === 'benefit') {
-    const caseId = `EPA${Date.now().toString().slice(-7)}`;
+    const caseId = nextRequestId('EPA');
     const args = { drugKey, patientId, prescriberNpi, pbm, caseId };
     const formulary = formularyLookup(drugKey);
     const messages = [
@@ -92,7 +107,7 @@ async function handlePOST(request) {
   }
 
   // step === 'submit'
-  const caseId = body.caseId || `EPA${Date.now().toString().slice(-7)}`;
+  const caseId = body.caseId || nextRequestId('EPA');
   const answers = body.answers || {};
   const decision = decideDrugPa(drugKey, answers);
   const reason = decision.reasonKey ? DRUG_DENIAL_REASONS[decision.reasonKey] : null;
@@ -105,7 +120,7 @@ async function handlePOST(request) {
     answers,
     decision,
     track: 'pharmacy',
-    trackData: { ndc: drug.siteOfCare.self.ndc, pbm, caseId, determination: decision.determination, reasonKey: decision.reasonKey }
+    trackData: { ndc: drug.siteOfCare.self.ndc, npi: prescriberNpi, pbm, caseId, determination: decision.determination, reasonKey: decision.reasonKey }
   });
 
   logTransaction('Prime Therapeutics', `NCPDP PA RESPONSE (${decision.determination.toUpperCase()})`, {

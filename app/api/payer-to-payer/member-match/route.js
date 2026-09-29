@@ -21,9 +21,9 @@ async function handlePOST(request) {
   const body = await request.json();
 
   // Extract MemberPatient and CoverageToMatch from the Parameters bundle.
-  const params = body?.parameter || [];
-  const memberPatientParam = params.find((p) => p.name === 'MemberPatient');
-  const coverageParam = params.find((p) => p.name === 'CoverageToMatch');
+  const params = Array.isArray(body?.parameter) ? body.parameter : [];
+  const memberPatientParam = params.find((p) => p?.name === 'MemberPatient');
+  const coverageParam = params.find((p) => p?.name === 'CoverageToMatch');
 
   const memberPatient = memberPatientParam?.resource;
   const coverageToMatch = coverageParam?.resource;
@@ -32,8 +32,8 @@ async function handlePOST(request) {
   // the patient id string directly (for the demo UI convenience path).
   let matchedPatientId = null;
 
-  if (coverageToMatch?.subscriberId) {
-    matchedPatientId = PATIENT_ID_BY_SUBSCRIBER[coverageToMatch.subscriberId] || null;
+  if (typeof coverageToMatch?.subscriberId === 'string' && Object.hasOwn(PATIENT_ID_BY_SUBSCRIBER, coverageToMatch.subscriberId)) {
+    matchedPatientId = PATIENT_ID_BY_SUBSCRIBER[coverageToMatch.subscriberId];
   }
   if (!matchedPatientId && memberPatient?.id && ALL_PATIENT_IDS.includes(memberPatient.id)) {
     matchedPatientId = memberPatient.id;

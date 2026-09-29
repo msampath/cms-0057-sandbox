@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { outboundRateLimit } from '@/lib/rateLimit';
 import { checkCoverage, availityMode } from '@/lib/availity';
 import { logTransaction } from '@/lib/db';
 import { getPatient } from '@/lib/patients';
@@ -19,6 +20,8 @@ export const dynamic = 'force-dynamic';
  * scope/endpoint discovery.
  */
 export async function POST(request) {
+  const limited = outboundRateLimit('Availity');
+  if (limited) return limited;
   let body;
   try {
     body = await request.json();

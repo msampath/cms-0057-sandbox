@@ -24,8 +24,47 @@ const PREINGESTED_PATH = path.join(process.cwd(), 'data', 'preIngestedRules.json
  * rule wins for any conflicting key; subsequent commits with the same
  * key are no-ops at the data level (but logged).
  */
+const MAX_RULES = 10000;
+const STRING_FIELDS = [
+  'service_code', 'service_category', 'description', 'pa_needed', 'managed_by',
+  'questionnaire_id', 'cql_library_id', 'documentation_requirements',
+  'effective_date', 'source_file', 'source_label', 'plan_type'
+];
+
+// Staged rules come from the extractor, but the route is callable directly,
+// so each rule is rebuilt from known fields with string values only.
+function normalizeRule(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return null;
+  if (!['code', 'category'].includes(r.match_type)) return null;
+  const out = { match_type: r.match_type };
+  for (const k of STRING_FIELDS) {
+    if (r[k] === null || r[k] === undefined) out[k] = null;
+    else if (typeof r[k] === 'string') out[k] = r[k].slice(0, 2000);
+    else return null;
+  }
+  if (r.match_type === 'code' && !out.service_code) return null;
+  if (r.match_type === 'category' && !out.service_category) return null;
+  if (!out.description) out.description = out.service_code || out.service_category;
+  if (!out.pa_needed) out.pa_needed = 'auth-needed';
+  if (Number.isInteger(r.source_page)) out.source_page = r.source_page;
+  return out;
+}
+
 export async function POST(request) {
-  const incoming = await request.json();
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'body must be a JSON array of rules' }, { status: 400 });
+  }
+  if (!Array.isArray(body) || body.length > MAX_RULES) {
+    return NextResponse.json({ error: `body must be a JSON array of at most ${MAX_RULES} rules` }, { status: 400 });
+  }
+  const incoming = body.map(normalizeRule);
+  const badIndex = incoming.findIndex((r) => !r);
+  if (badIndex >= 0) {
+    return NextResponse.json({ error: `rule ${badIndex} is not a valid code or category rule` }, { status: 400 });
+  }
   const db = getDb();
 
   // --- Merge into active DB ---

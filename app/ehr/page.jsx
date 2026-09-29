@@ -440,6 +440,7 @@ export default function EhrDashboard() {
   // $submit-attachment result.
   const [cdexTask, setCdexTask] = useState(null);
   const [attachmentResult, setAttachmentResult] = useState(null);
+  const [attachmentSending, setAttachmentSending] = useState(false);
   // Route PAS through the simulated clearinghouse (conformance check), and
   // optionally claim an unsupported PAS version to see it rejected.
   const [viaClearinghouse, setViaClearinghouse] = useState(false);
@@ -703,6 +704,14 @@ export default function EhrDashboard() {
     const iv = setInterval(async () => {
       try {
         const res = await fetch(apiUrl(`/api/pas/pended/${pendedId}`));
+        if (res.status === 404) {
+          // The pended request is gone (demo reset or a restart). Stop polling.
+          clearInterval(iv);
+          if (scenarioVersionRef.current !== pollVersion) return;
+          setPendedId(null);
+          setClearinghouseRejection({ _via: 'pas', issue: [{ severity: 'error', diagnostics: 'The pended request no longer exists on the payer (demo reset or restart). Submit it again.' }] });
+          return;
+        }
         if (!res.ok) return;
         const data = await res.json();
         if (scenarioVersionRef.current !== pollVersion) return;
@@ -798,11 +807,20 @@ export default function EhrDashboard() {
       'hard-stop-trigger': hardStopFlag
     };
 
-    const res = await fetch(apiUrl('/api/cds-services/order-sign'), {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
+    let data;
+    try {
+      const res = await fetch(apiUrl('/api/cds-services/order-sign'), {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      data = await res.json();
+      if (!res.ok) throw new Error(data?.issue?.[0]?.diagnostics || data?.error || `HTTP ${res.status}`);
+    } catch (e) {
+      if (!stillCurrent()) return;
+      setCard({ summary: 'Order-sign hook failed', indicator: 'warning', detail: String(e.message || e) });
+      setLoading(false);
+      return;
+    }
     if (!stillCurrent()) return; // scenario switched mid-flight; drop
     setCard(data.cards?.[0] || null);
     // Persist the incoming coverage-information system action so the EHR
@@ -935,7 +953,8 @@ export default function EhrDashboard() {
         const rRes = await fetch(apiUrl(`/api/drug-pa/record?patientId=${encodeURIComponent(pid)}&drugKey=${order.drug}`));
         const { record } = await rRes.json();
         if (stillCurrent() && record?.answers) {
-          setAnswers((a) => ({ ...a, ...record.answers }));
+          // Answers already in the form (typed on a re-launch) win.
+          setAnswers((a) => ({ ...record.answers, ...a }));
           setDrugPrefillFrom(record.tracks?.pharmacy ? 'pharmacy' : null);
         }
       } catch {
@@ -1061,8 +1080,9 @@ export default function EhrDashboard() {
       const data = pasResult.value;
       const { claimResponse, task } = extractPasResponse(data);
       if (data?.resourceType === 'OperationOutcome') {
-        // The clearinghouse rejected the Bundle before it reached the payer.
-        setClearinghouseRejection(data);
+        // The clearinghouse rejected the Bundle before it reached the payer,
+        // or the payer rejected the request itself.
+        setClearinghouseRejection({ ...data, _via: viaClearinghouse ? 'clearinghouse' : 'pas' });
         setPasResponse(null);
       } else if (readReviewAction(claimResponse)?.actionCode === 'A4') {
         setPendedId(claimResponse.preAuthRef);
@@ -1081,6 +1101,12 @@ export default function EhrDashboard() {
           .then(({ record }) => { if (stillCurrent()) setDrugRecord(record); })
           .catch(() => {});
       }
+    } else {
+      setPasResponse(null);
+      setClearinghouseRejection({
+        _via: 'pas',
+        issue: [{ severity: 'error', diagnostics: `PAS request failed: ${pasResult.reason?.message || 'network error'}` }]
+      });
     }
     if (optumResp.status === 'fulfilled') {
       setOptumPasResult(optumResp.value);
@@ -1976,7 +2002,9 @@ export default function EhrDashboard() {
               {!attachmentResult?.ok && (
                 <button
                   type="button"
+                  disabled={attachmentSending}
                   onClick={async () => {
+                    if (attachmentSending) return;
                     // Answer with the member id the payer put in the Task, so
                     // Epic sandbox patients (not in lib/patients.js) match too.
                     const myVersion = scenarioVersionRef.current;
@@ -1988,16 +2016,23 @@ export default function EhrDashboard() {
                         scenario.patientId,
                       practitionerNpi: scenario.npi
                     });
-                    const res = await fetch(apiUrl('/api/cdex/$submit-attachment'), {
-                      method: 'POST',
-                      body: JSON.stringify(params)
-                    });
-                    const json = await res.json().catch(() => ({}));
-                    // Drop the result if the scenario or order changed meanwhile.
-                    if (scenarioVersionRef.current !== myVersion) return;
-                    setAttachmentResult({ ok: res.ok, text: json?.issue?.[0]?.diagnostics || `HTTP ${res.status}` });
+                    setAttachmentSending(true);
+                    try {
+                      const res = await fetch(apiUrl('/api/cdex/$submit-attachment'), {
+                        method: 'POST',
+                        body: JSON.stringify(params)
+                      });
+                      const json = await res.json().catch(() => ({}));
+                      // Drop the result if the scenario or order changed meanwhile.
+                      if (scenarioVersionRef.current !== myVersion) return;
+                      setAttachmentResult({ ok: res.ok, text: json?.issue?.[0]?.diagnostics || `HTTP ${res.status}` });
+                    } catch (e) {
+                      if (scenarioVersionRef.current === myVersion) setAttachmentResult({ ok: false, text: e.message || 'network error' });
+                    } finally {
+                      setAttachmentSending(false);
+                    }
                   }}
-                  className="mt-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded"
+                  className="mt-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded"
                 >
                   {attachmentResult ? 'Retry' : 'Submit requested attachment'} (CDex $submit-attachment)
                 </button>
@@ -2012,7 +2047,9 @@ export default function EhrDashboard() {
 
       {clearinghouseRejection && (
         <div className="bg-orange-50 border-2 border-orange-600 text-orange-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
-          <div className="font-bold text-lg mb-1">✗ Rejected by the clearinghouse before reaching the payer</div>
+          <div className="font-bold text-lg mb-1">
+            {clearinghouseRejection._via === 'pas' ? '✗ PAS request failed' : '✗ Rejected by the clearinghouse before reaching the payer'}
+          </div>
           {(clearinghouseRejection.issue || []).map((i, n) => (
             <div key={n} className="text-sm">{i.severity}: {i.diagnostics}</div>
           ))}

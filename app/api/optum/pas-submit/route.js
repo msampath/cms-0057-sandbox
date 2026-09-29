@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { outboundRateLimit } from '@/lib/rateLimit';
 import { submitClaim, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
 
@@ -17,6 +18,8 @@ export const dynamic = 'force-dynamic';
  * CMS-0057-F mandate.
  */
 export async function POST(request) {
+  const limited = outboundRateLimit('Optum');
+  if (limited) return limited;
   let bundle;
   try {
     bundle = await request.json();

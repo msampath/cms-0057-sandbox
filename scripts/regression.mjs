@@ -320,7 +320,8 @@ async function phase3() {
   // A conformant Bundle with no sandbox planType falls back to the member's plan.
   const bare = drugPasBundle('pat-4410-david-kim', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true });
   delete bare.planType;
-  await post('/api/pas/submit', bare);
+  const bareCr = (await post('/api/pas/submit', bare)).json?.entry?.[0]?.resource;
+  check('PAS without planType: approved (A1)', review(bareCr)?.action === 'A1', JSON.stringify(review(bareCr)));
   const bareLog = (await logsFor(/^FHIR RESPONSE$/))[0];
   check('PAS without planType uses the member plan (QHP clock)', bareLog?.clock?.hours === 72 && bareLog?.clock?.proposed === true);
 
@@ -449,7 +450,8 @@ async function phase5() {
   const m1 = (await metrics())?.priorAuthorization;
   check('PA metrics: medical items now 2 requests, 2 approved, 100%', m1?.medicalItems?.requests === 2 && m1.medicalItems.approved === 2 && m1.medicalItems.approvedPct === 100, JSON.stringify(m1?.medicalItems));
   check('PA metrics: forced debug denial not counted', m1?.drugs?.medicalBenefit?.requests === 0, JSON.stringify(m1?.drugs?.medicalBenefit));
-  check('PA metrics: pharmacy drugs 2 requests (1 denied, 1 approved)', m1?.drugs?.pharmacyBenefit?.requests === 2 && m1.drugs.pharmacyBenefit.denied === 1 && m1.drugs.pharmacyBenefit.approved === 1);
+  check('PA metrics: pharmacy drugs 1 request, denied (MA Part D left out of every aggregate)', m1?.drugs?.pharmacyBenefit?.requests === 1 && m1.drugs.pharmacyBenefit.denied === 1, JSON.stringify(m1?.drugs?.pharmacyBenefit));
+  check('PA metrics: all drugs also leave out MA Part D', m1?.drugs?.all?.requests === 1, JSON.stringify(m1?.drugs?.all));
   check('MA-PPO drug row present from the seeded baseline', (m0?.priorAuthorization?.drugs?.byPlan || []).some((p) => p.planType === 'MA-PPO'));
   const ma = m1?.drugs?.byPlan?.find((p) => p.planType === 'MA-PPO');
   check('PA metrics: MA drug metrics exclude Part D (0 requests), with note', ma?.requests === 0 && /Part B drugs only/.test(ma?.note || ''), JSON.stringify(ma));
@@ -533,6 +535,7 @@ async function phase6() {
   check('attachment for a different member → 422', wrongMember.status === 422);
   const ok = await post('/api/cdex/$submit-attachment', attachmentParams(auth));
   check('final attachment accepted (200 OperationOutcome)', ok.status === 200 && ok.json?.resourceType === 'OperationOutcome');
+  check('still pended right after the final attachment (review window running)', (await call('/api/pas/pended/' + auth)).json?.status === 'pended');
   const during = await post('/api/cdex/$submit-attachment', attachmentParams(auth));
   check('another attachment during review → 409 (window not restarted)', during.status === 409);
   await sleep(8500);
@@ -594,10 +597,72 @@ async function phase7() {
   }
 }
 
+async function hardening() {
+  console.log('\nSuper-review hardening: tokens and scopes');
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const pScopes = ['patient/Patient.read', 'patient/Coverage.read', 'patient/ExplanationOfBenefit.read', 'patient/ClaimResponse.read'];
+  const pTok = await token(pScopes);
+  const [h, , sig] = pTok.split('.');
+  const tampered = [h, b64({ iss: 'cms-0057-sandbox-auth', aud: 'cms-0057-sandbox-fhir', exp: 4102444800, scope: pScopes.join(' ') }), sig].join('.');
+  const PA = '/api/patient-access?patientId=pat-8849-jane-doe';
+  const auth = (t) => ({ headers: { authorization: 'Bearer ' + t } });
+  check('good token → 200 (positive control)', (await call(PA, auth(pTok))).status === 200);
+  check('tampered payload → 401', (await call(PA, auth(tampered))).status === 401);
+  const none = [b64({ alg: 'none', typ: 'JWT' }), tampered.split('.')[1], ''].join('.');
+  check('alg none → 401', (await call(PA, auth(none))).status === 401);
+  const hs = [b64({ alg: 'HS512', typ: 'JWT' }), tampered.split('.')[1], sig].join('.');
+  check('wrong alg → 401', (await call(PA, auth(hs))).status === 401);
+  check('header that decodes to null → 401, not 500', (await call(PA, auth('bnVsbA.a.b'))).status === 401);
+  const sTok = await token(['system/Patient.read', 'system/ExplanationOfBenefit.read', 'system/ClaimResponse.read']);
+  check('patient-scoped token on Provider Access → 403', (await call('/api/provider-access?npi=1234567890', auth(pTok))).status === 403);
+  check('Provider Access without a token → 401', (await call('/api/provider-access?npi=1234567890')).status === 401);
+  const pv = (await call('/api/provider-access?npi=1234567890', auth(sTok))).json;
+  check('Provider Access panel is not empty for the demo NPI', (pv?.patients || []).length > 0);
+  check('member-match without a token → 401', (await post('/api/payer-to-payer/member-match', { resourceType: 'Parameters', parameter: [] })).status === 401);
+  check('P2P history without a token → 401', (await call('/api/payer-to-payer/history/pat-7712-robert-chen')).status === 401);
+  const p2pTok = await token(['system/Patient.read', 'system/Coverage.read', 'system/ExplanationOfBenefit.read', 'system/ClaimResponse.read']);
+  check('P2P history for an inherited key (constructor) → 404', (await call('/api/payer-to-payer/history/constructor', auth(p2pTok))).status === 404);
+  const disc = await call('/api/.well-known/smart-configuration');
+  check('SMART discovery advertises only what the token endpoint does', disc.status === 200 && /\/cms-0057\/api\/auth\/token$/.test(disc.json?.token_endpoint || '') &&
+    !(disc.json?.capabilities || []).some((c) => /client-confidential|permission-v2/.test(c)));
+
+  console.log('\nSuper-review hardening: request bodies');
+  check('order-sign with JSON null → 400', (await post('/api/cds-services/order-sign', null)).status === 400);
+  check('PAS submit with a JSON array → 400', (await post('/api/pas/submit', [])).status === 400);
+  const badJson = await fetch(BASE + '/api/pas/submit', { method: 'POST', body: '{not json', headers: { 'content-type': 'application/json' } });
+  check('PAS submit with invalid JSON → 400', badJson.status === 400);
+  check('pharmacy drug track with a numeric planType → 400', (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'x', planType: 123 })).status === 400);
+  check('pharmacy drug track with drugKey constructor → 400', (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'constructor', patientId: 'x' })).status === 400);
+  check('metrics still 200 after the bad requests', (await call('/api/metrics')).status === 200);
+  check('commit-rules rejects a malformed rule → 400', (await post('/api/commit-rules', [{ match_type: 'category', service_category: 5 }])).status === 400);
+  check('commit-rules rejects a non-array body → 400', (await post('/api/commit-rules', { rules: [] })).status === 400);
+
+  console.log('\nSuper-review hardening: CRD and X12');
+  const goldNoNpi = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-g1', code: '27447', planType: 'COMM-PPO', patientId: 'pat-3301-dorothy-hayes', patient: { id: 'pat-3301-dorothy-hayes' } })).json;
+  check('gold card needs an enrolled NPI (none sent → no exemption)', !/gold-card/.test(goldNoNpi?.cards?.[0]?.summary || ''), goldNoNpi?.cards?.[0]?.summary);
+  const gold = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-g2', code: '27447', planType: 'COMM-PPO', practitionerNpi: 'GOLD-NPI-0001', patientId: 'pat-3301-dorothy-hayes', patient: { id: 'pat-3301-dorothy-hayes' } })).json;
+  const paNeeded = (gold?.systemActions?.[0]?.resource?.extension || []).find((e) => e.url.endsWith('#pa-needed'))?.valueCode;
+  check('gold card: card and coverage-information Task agree (satisfied)', /gold-card/.test(gold?.cards?.[0]?.summary || '') && paNeeded === 'satisfied', paNeeded);
+  const inj = pasBundle('70553');
+  inj.entry[0].resource.name = [{ family: 'Doe~NM1*XX', given: ['Jane'] }];
+  await post('/api/pas/submit', inj);
+  const x12 = String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '');
+  check('X12 delimiters in Bundle values are neutralized', x12.includes('DOE NM1 XX') && !x12.includes('~NM1*XX'));
+  const numeric = pasBundle('70553');
+  numeric.entry[0].resource.name = [{ family: 42 }];
+  check('numeric family name → no 500', (await post('/api/pas/submit', numeric)).status === 200);
+  const pasProfile = 'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-pas-request-bundle';
+  const mixed = { ...pasBundle('70553'), meta: { profile: [pasProfile, pasProfile + '|1.1.0'] } };
+  check('clearinghouse checks every PAS profile claim (unversioned + 1.1.0 → 422)', (await post('/api/clearinghouse/pas', mixed)).status === 422);
+}
+
 // Phase checks are appended below as each phase lands.
-const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5, phase6, phase7];
+const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5, phase6, phase7, hardening];
 
 console.log(`Regression against ${BASE}`);
+// Start from the seeded baseline, whatever state the server was left in.
+const startReset = await call('/api/demo/reset?mode=seeded', { method: 'POST' });
+check('reset to the seeded baseline before the run', startReset.status === 200);
 for (const phase of PHASES) await phase();
 console.log(`\n${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);
