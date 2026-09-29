@@ -106,7 +106,8 @@ def normalize_effective(s):
     if m:
         mo, dy, yr = m.groups()
         if len(yr) == 2: yr = '20' + yr
-        return f'{yr}-{int(mo):02d}-{int(dy):02d}'
+        if 1 <= int(mo) <= 12 and 1 <= int(dy) <= 31:
+            return f'{yr}-{int(mo):02d}-{int(dy):02d}'
     if 'effective since before 9/1/2019' in s.lower(): return '2019-09-01'
     return '2026-01-01'
 
@@ -129,7 +130,13 @@ def bind_questionnaire(desc, doc_req='', category=''):
 
 def extract_pdf(path, kind):
     rules = []
-    with pdfplumber.open(path) as pdf:
+    try:
+        pdf_file = pdfplumber.open(path)
+    except Exception as e:
+        # Exit 3 tells /api/extract the upload is not a readable PDF.
+        print(f'cannot open PDF: {e}', file=sys.stderr)
+        sys.exit(3)
+    with pdf_file as pdf:
         for pi, page in enumerate(pdf.pages):
             words = page.extract_words()
             rows = group_rows(words, kind)

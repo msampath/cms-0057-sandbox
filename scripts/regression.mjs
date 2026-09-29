@@ -5,8 +5,8 @@
  *   BASE_URL=https://surakshith.com/cms-0057 npm run regression
  *
  * Covers the four CMS-0057-F APIs plus the CMS-0062-P additions. Each
- * phase adds its checks here. Exits non-zero on the first failed run so it
- * can gate a commit. No test framework: plain fetch and a small check().
+ * phase adds its checks here. Runs every check, then exits non-zero if any
+ * failed, so it can gate a commit. No test framework: plain fetch and a small check().
  */
 
 const BASE = (process.env.BASE_URL || 'http://localhost:3000/cms-0057').replace(/\/$/, '');
@@ -17,19 +17,25 @@ import tls from 'node:tls';
 // A raw POST with neither Content-Length nor Transfer-Encoding. fetch and
 // http.request always send one of them, so this writes the request by hand.
 function rawPostNoBody(path) {
+  return rawPost(path, '', '');
+}
+
+// A hand-written POST with the given header lines and raw body. Resolves
+// with the status code, or 0 when the connection fails.
+function rawPost(path, headerLines, rawBody) {
   return new Promise((resolve, reject) => {
     const u = new URL(BASE + path);
     const secure = u.protocol === 'https:';
     const port = Number(u.port) || (secure ? 443 : 80);
     const sock = secure ? tls.connect({ host: u.hostname, port, servername: u.hostname }) : net.connect({ host: u.hostname, port });
     let data = '';
-    sock.setTimeout(10000, () => { sock.destroy(); reject(new Error('timeout')); });
+    sock.setTimeout(10000, () => { sock.destroy(); resolve(Number((data.match(/^HTTP\/1\.[01] (\d{3})/) || [])[1] || 0)); });
     sock.on(secure ? 'secureConnect' : 'connect', () => {
-      sock.write(`POST ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.host}\r\nConnection: close\r\n\r\n`);
+      sock.write(`POST ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.host}\r\nConnection: close\r\n${headerLines}\r\n${rawBody}`);
     });
     sock.on('data', (d) => { data += d.toString('latin1'); });
     sock.on('end', () => resolve(Number((data.match(/^HTTP\/1\.[01] (\d{3})/) || [])[1] || 0)));
-    sock.on('error', reject);
+    sock.on('error', () => resolve(0));
   });
 }
 
@@ -685,8 +691,10 @@ async function hardening() {
   const PA = '/api/patient-access?patientId=pat-8849-jane-doe';
   const auth = (t) => ({ headers: { authorization: 'Bearer ' + t } });
   check('good token → 200 (positive control)', (await call(PA, auth(pTok))).status === 200);
-  const wwwAuth = async (init) => (await fetch(BASE + PA.replace('/api', '/api'), init)).headers.get('www-authenticate') || '';
-  check('no-token 401 WWW-Authenticate has no error attribute', !/error=/.test(await wwwAuth({})));
+  const wwwAuth = async (init) => (await fetch(BASE + PA, init)).headers.get('www-authenticate') || '';
+  const noTokRes = await fetch(BASE + PA);
+  const noTokHdr = noTokRes.headers.get('www-authenticate') || '';
+  check('no-token 401 WWW-Authenticate is a Bearer challenge with no error attribute', noTokRes.status === 401 && /^Bearer realm=/.test(noTokHdr) && !/error=/.test(noTokHdr), noTokHdr);
   check('bad-token 401 WWW-Authenticate says invalid_token', /error="invalid_token"/.test(await wwwAuth(auth('a.b.c'))));
   check('tampered payload → 401', (await call(PA, auth(tampered))).status === 401);
   const none = [b64({ alg: 'none', typ: 'JWT' }), tampered.split('.')[1], ''].join('.');
@@ -776,6 +784,37 @@ async function hardening() {
   await post('/api/pas/submit', dxBundle);
   const dxX12 = String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '');
   check('X12 278: Claim.diagnosis → HI*ABK (ICD-10, no decimal), no ICD-9 BK', dxX12.includes('HI*ABK:G43909') && !dxX12.includes('HI*BK:'));
+
+  console.log('\nSuper-review round 8: CDS Hooks shape, metering, bounds');
+  const specHook = (await post('/api/cds-services/order-sign', {
+    hook: 'order-sign', hookInstance: 'reg-spec-1', planType: 'COMM-PPO', practitionerNpi: '1234567890',
+    context: { patientId: 'pat-8849-jane-doe', draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-1', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '70553' }] } } }] } }
+  })).json;
+  const specOrder = specHook?.systemActions?.[0]?.resource;
+  check('a spec-shaped hook (context.patientId, draftOrders code) is evaluated like the sandbox shape',
+    specHook?.cards?.[0]?.summary === 'Prior authorization required' && specOrder?.subject?.reference === 'Patient/pat-8849-jane-doe' && specOrder?.id === 'sr-spec-1',
+    JSON.stringify([specHook?.cards?.[0]?.summary, specOrder?.subject?.reference]));
+  const usageOf2 = async (api) => ((await call('/api/metrics')).json?.usage || []).find((u) => u.api === api) || { total: 0, unauthenticated: 0 };
+  const beforeBasic = await usageOf2('Patient Access');
+  await call('/api/patient-access?patientId=pat-8849-jane-doe', { headers: { authorization: 'Basic eDp5' } });
+  const afterBasic = await usageOf2('Patient Access');
+  check('a non-Bearer Authorization header counts with the no-token calls', afterBasic.unauthenticated === beforeBasic.unauthenticated + 1);
+  const beforeCql = await usageOf2('Prior Authorization');
+  check('the CQL route serves the library', (await call('/api/cql/MRIBrainPrepopulation')).status === 200);
+  check('the CQL route is metered under Prior Authorization', (await usageOf2('Prior Authorization')).total === beforeCql.total + 1);
+  const cdPend2 = (await post('/api/pas/submit', pasBundle('15820', {}, 'MA-PPO'))).json?.entry?.[0]?.resource?.preAuthRef;
+  const numTracking = attachmentParams(cdPend2);
+  numTracking.parameter = numTracking.parameter.map((p) => (p.name === 'TrackingId' ? { name: 'TrackingId', valueIdentifier: { value: 42 } } : p));
+  check('$submit-attachment with a non-string TrackingId → 400', (await post('/api/cdex/$submit-attachment', numTracking)).status === 400);
+  const emptyOrg = attachmentParams(cdPend2);
+  emptyOrg.parameter.push({ name: 'OrganizationId' });
+  check('$submit-attachment with an empty OrganizationId → 400', (await post('/api/cdex/$submit-attachment', emptyOrg)).status === 400);
+  check('extract refuses a chunked upload → 411', (await rawPost('/api/extract', 'Transfer-Encoding: chunked\r\nContent-Type: multipart/form-data; boundary=x\r\n', '0\r\n\r\n')) === 411);
+  // Next reads the declared body before the route runs, so these send real bodies.
+  const bigUpload = new FormData();
+  bigUpload.append('file', new Blob([new Uint8Array(26 * 1024 * 1024)], { type: 'application/pdf' }), '2026-commercial-bh-pa-code-list.pdf');
+  check('extract refuses an upload over 25 MB → 413', (await fetch(BASE + '/api/extract', { method: 'POST', body: bigUpload })).status === 413);
+  check('PAS refuses a body over 1 MB → 413', (await fetch(BASE + '/api/pas/submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pad: 'x'.repeat(1100 * 1024) }) })).status === 413);
 
   console.log('\nSuper-review round 3: cascade, attribution, integrations');
   const hmo = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h1', code: '99999', planType: 'COMM-HMO', practitionerNpi: '1234567890', patientId: 'pat-6614-marcus-johnson', patient: { id: 'pat-6614-marcus-johnson' } })).json;
@@ -880,9 +919,22 @@ async function hardening() {
   check('the fullUrl reference is used for the order subject too', noIdOrder?.subject?.reference === 'urn:uuid:3f2a6c1e-0000-4000-8000-000000000001');
   const noIdDrug = drugPasBundle('x', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true });
   delete noIdDrug.entry[0].resource.id;
-  await post('/api/pas/submit', noIdDrug);
-  check('a J0717 Bundle with an id-less Patient keeps no shared record under "unknown"',
+  const noIdDrugRes = await post('/api/pas/submit', noIdDrug);
+  check('a J0717 Bundle with an id-less Patient is decided (A1) and keeps no shared record under "unknown"',
+    noIdDrugRes.status === 200 && review(noIdDrugRes.json?.entry?.[0]?.resource)?.action === 'A1' &&
     !(await call('/api/drug-pa/record?patientId=unknown&drugKey=certolizumab')).json?.record);
+  const nullEntry = { resourceType: 'Bundle', type: 'collection', entry: [{ fullUrl: 'Patient/pat-8849-jane-doe', resource: null }, { resource: { resourceType: 'Claim', item: [{ sequence: 1, productOrService: { coding: [{ code: '70553' }] } }] } }] };
+  const nullEntryCr = (await post('/api/pas/submit', nullEntry)).json?.entry?.[0]?.resource;
+  check('a Bundle with no Patient never borrows a fullUrl for its reference', nullEntryCr?.outcome === 'error' && nullEntryCr?.patient?.reference === 'Patient/unknown', nullEntryCr?.patient?.reference);
+  const badFullUrl = pasBundle('70553');
+  delete badFullUrl.entry[0].resource.id;
+  badFullUrl.entry[0].fullUrl = 'Patient/pat-3301-dorothy-hayes';
+  check('a fullUrl that is not a urn:uuid or absolute URL is not used as the reference',
+    (await post('/api/pas/submit', badFullUrl)).json?.entry?.[0]?.resource?.patient?.reference === 'Patient/unknown');
+  const objName = pasBundle('70553');
+  objName.entry[0].resource.name = [{ family: { toString: 1 } }];
+  await post('/api/pas/submit', objName);
+  check('X12 falls back to UNKNOWN when the family name is not text', String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '').includes('NM1*IL*1*UNKNOWN*'));
   const bigType = pasBundle('15820', {}, 'MA-PPO');
   bigType.entry[1].resource.type = { coding: [{ system: 'x', code: 'professional', display: 'd'.repeat(5000) }] };
   const bigTypeCr = (await post('/api/pas/submit', bigType)).json?.entry?.[0]?.resource;

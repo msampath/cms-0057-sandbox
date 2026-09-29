@@ -41,7 +41,7 @@ export default function UmDashboard() {
   // SWR dedupes by key — both this and <RulesExplorer> share the same
   // cached response, no double fetch. The full rule set is large, so it is
   // polled slowly and revalidated right after a commit, load, or reset.
-  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: tab === 'rules' ? 15000 : 0 });
+  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: tab === 'rules' ? 15000 : 0, revalidateOnFocus: tab === 'rules' });
   const ruleCount = rulesData?.rules?.length ?? 0;
   // One-shot probe: can this host run the Python extractor? Undefined while
   // loading is treated as available so the form does not flash disabled.
@@ -185,7 +185,7 @@ export default function UmDashboard() {
         <h1 className="text-2xl font-bold text-green-400">Payer Interop Gateway (UM)</h1>
         <div className="flex gap-1">
           <button
-            onClick={() => setTab('rules')}
+            onClick={() => { setTab('rules'); mutateKey(apiUrl('/api/rules')); }}
             className={`px-3 py-1.5 rounded text-sm ${tab === 'rules' ? 'bg-blue-700 text-white font-semibold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
           >
             Rules &amp; Schema
@@ -228,7 +228,7 @@ export default function UmDashboard() {
       </div>
 
       {/* Rules & Schema tab — Rules Explorer + Schema Explorer + Pipeline */}
-      {tab === 'rules' && (<>
+      {tab === 'rules' && (<div className="flex-grow overflow-auto min-h-0">
       {!staging && ruleCount > 0 && (
         <div className="shrink-0">
           <RulesExplorer />
@@ -291,7 +291,7 @@ export default function UmDashboard() {
           />
         )}
       </div>
-      </>)}
+      </div>)}
 
       {tab === 'provider' && (
         <div className="flex-grow overflow-auto">

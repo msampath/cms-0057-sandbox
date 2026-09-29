@@ -132,9 +132,13 @@ export async function handlePOST(request) {
   // Every decision log carries the requesting NPI, so Provider Access shows
   // item PAs as well as CRD events.
   // An entry identified only by fullUrl is referenced by that fullUrl.
-  const patientRef = patient?.id
+  // The fullUrl must be a urn:uuid or an absolute http(s) URL.
+  const FULL_URL = /^(urn:uuid:[0-9a-f-]{36}|https?:\/\/[^\s]{1,200})$/i;
+  const patientRef = !patient
+    ? 'Patient/unknown'
+    : patient.id
     ? `Patient/${patient.id}`
-    : (Array.isArray(bundle?.entry) ? bundle.entry : []).find((e) => e?.resource === patient && typeof e.fullUrl === 'string' && e.fullUrl.length <= 200)?.fullUrl || 'Patient/unknown';
+    : (Array.isArray(bundle?.entry) ? bundle.entry : []).find((e) => e?.resource === patient && typeof e.fullUrl === 'string' && FULL_URL.test(e.fullUrl))?.fullUrl || 'Patient/unknown';
   const logMeta = {
     patientId: patient?.id || 'unknown',
     npi: practitionerNpiOf(bundle) || getPatient(patient?.id)?.npi || null
@@ -156,7 +160,7 @@ export async function handlePOST(request) {
   logTransaction(
     'PAS Gateway',
     'BUNDLE RECEIVED',
-    `FHIR Bundle (type=${textOf(bundle.type).slice(0, 40) || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
+    `FHIR Bundle (type=${textOf(bundle.type).slice(0, 40) || '—'}) for ${patientRef}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
     logMeta
   );
 
@@ -429,7 +433,7 @@ export async function handlePOST(request) {
       authNumber,
       patient: {
         memberId: member?.subscriberId || patient?.id || 'unknown',
-        family: member?.family || (typeof patient?.name?.[0]?.family === 'string' ? patient.name[0].family.slice(0, 60) : 'Unknown'),
+        family: member?.family || (typeof patient?.name?.[0]?.family === 'string' && patient.name[0].family ? patient.name[0].family.slice(0, 60) : 'Unknown'),
         given: member?.given || (Array.isArray(patient?.name?.[0]?.given) ? patient.name[0].given.filter((g) => typeof g === 'string' && g).slice(0, 3).map((g) => g.slice(0, 35)) : [])
       },
       practitionerNpi,

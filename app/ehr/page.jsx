@@ -453,6 +453,7 @@ export default function EhrDashboard() {
   // Bumped per Sign Order, so an earlier signing's Optum CRD or Availity
   // reply cannot land on a later one.
   const signReqRef = useRef(0);
+  const dtrReqRef = useRef(0);
   pendedIdRef.current = pendedId;
   // Route PAS through the simulated clearinghouse (conformance check), and
   // optionally claim an unsupported PAS version to see it rejected.
@@ -873,7 +874,7 @@ export default function EhrDashboard() {
     // Optum Real Prior Authorization: a second, independent CRD opinion
     // on the same order, from UnitedHealthcare's actual engine. Only
     // meaningful for a real service code -- skip for category-only orders.
-    if (order.code && order.code !== 'NOCODE') {
+    if (order.code && order.code !== 'NOCODE' && data.cards?.[0]?.indicator !== 'hard-stop') {
       setOptumOrderSignLoading(true);
       fetch(apiUrl('/api/optum/cds-order-sign'), {
         method: 'POST',
@@ -1031,15 +1032,18 @@ export default function EhrDashboard() {
     // only -- the form above continues to drive this sandbox's own PAS
     // submission.
     const patient = buildPatientResource(scenario);
+    const myDtr = ++dtrReqRef.current;
+    const thisDtr = () => stillCurrent() && dtrReqRef.current === myDtr;
+    setOptumQuestionnaire(null);
     setOptumQuestionnaireLoading(true);
     fetch(apiUrl('/api/optum/dtr-questionnaire'), {
       method: 'POST',
       body: JSON.stringify({ patientId: patient.id })
     })
       .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-      .then((result) => { if (stillCurrent()) setOptumQuestionnaire(result); })
-      .catch((err) => { if (stillCurrent()) setOptumQuestionnaire({ ok: false, json: { error: err.message } }); })
-      .finally(() => { if (stillCurrent()) setOptumQuestionnaireLoading(false); });
+      .then((result) => { if (thisDtr()) setOptumQuestionnaire(result); })
+      .catch((err) => { if (thisDtr()) setOptumQuestionnaire({ ok: false, json: { error: err.message } }); })
+      .finally(() => { if (thisDtr()) setOptumQuestionnaireLoading(false); });
   };
 
   // ---- Phase 4: Submit PAS Bundle ----------------------------------------
@@ -1133,12 +1137,14 @@ export default function EhrDashboard() {
         // or the payer rejected the request itself.
         setClearinghouseRejection({ ...data, _via: viaClearinghouse ? 'clearinghouse' : 'pas' });
         setPasResponse(null);
+        setSystemAction(systemAction);
       } else if (readReviewAction(claimResponse)?.actionCode === 'A4') {
         setPendedId(claimResponse.preAuthRef);
         setPasResponse(claimResponse);
         setPasDecidedAt(null);
         // The pend's CDex attachment request travels in the same Bundle.
         setCdexTask(task?.code?.coding?.[0]?.code === 'attachment-request-code' ? task : null);
+        setSystemAction(systemAction);
       } else {
         setPasResponse(claimResponse);
         setPasDecidedAt(new Date().toISOString());
@@ -1152,6 +1158,7 @@ export default function EhrDashboard() {
       }
     } else {
       setPasResponse(null);
+      setSystemAction(systemAction);
       setClearinghouseRejection({
         _via: 'pas',
         issue: [{ severity: 'error', diagnostics: `PAS request failed: ${pasResult.reason?.message || 'network error'}` }]
@@ -1175,6 +1182,7 @@ export default function EhrDashboard() {
     // revert their deliberate selection.
     epicFetchReqRef.current += 1;
     const myReq = epicFetchReqRef.current;
+    const previousEpicId = epicPatientId;
     setEpicPatientId(id);
     setEpicResult(null);
     setEpicError(null);
@@ -1189,6 +1197,7 @@ export default function EhrDashboard() {
       }
       if (!res.ok) {
         setEpicError(data?.error || `HTTP ${res.status}`);
+        setEpicPatientId(previousEpicId);
       } else {
         // Invalidate SYNCHRONOUSLY (before React schedules the
         // re-render) but only if identity is actually changing --
@@ -1207,6 +1216,7 @@ export default function EhrDashboard() {
     } catch (e) {
       if (epicFetchReqRef.current === myReq) {
         setEpicError(e.message);
+        setEpicPatientId(previousEpicId);
       }
     } finally {
       if (epicFetchReqRef.current === myReq) {

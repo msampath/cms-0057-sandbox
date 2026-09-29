@@ -1,4 +1,8 @@
 import { claimDiagnosisCodes } from '@/lib/routing';
+import { textOf } from '@/lib/fhir';
+
+// The first candidate with text, so an object does not hide the fallbacks.
+const firstText = (...vals) => vals.map(textOf).find(Boolean) || '';
 
 /**
  * FHIR Bundle → X12 278 projection.
@@ -58,19 +62,14 @@ function patientName(p) {
   if (!p?.name?.[0]) return { family: 'DOE', given: 'JANE' };
   return {
     // NM103 is up to 60 characters and NM104 up to 35.
-    family: x12Safe(p.name[0].family || 'UNKNOWN').toUpperCase().slice(0, 60),
-    given: x12Safe(p.name[0].given?.[0] || '').toUpperCase().slice(0, 35)
+    family: x12Safe(firstText(p.name[0].family, 'UNKNOWN')).toUpperCase().slice(0, 60),
+    given: x12Safe(firstText(Array.isArray(p.name[0].given) ? p.name[0].given[0] : '')).toUpperCase().slice(0, 35)
   };
 }
 
 function memberId(coverage, patient) {
   // NM109 is up to 80 characters.
-  return x12Safe(
-    coverage?.subscriberId ||
-    coverage?.identifier?.[0]?.value ||
-    patient?.id ||
-    'UNKNOWN'
-  ).slice(0, 80);
+  return x12Safe(firstText(coverage?.subscriberId, coverage?.identifier?.[0]?.value, patient?.id, 'UNKNOWN')).slice(0, 80);
 }
 
 // Principal diagnosis from Claim.diagnosis (R4 Patient has no condition).
@@ -89,11 +88,7 @@ function servicedDate(claim) {
 function npi(practitioner) {
   const ids = Array.isArray(practitioner?.identifier) ? practitioner.identifier : [];
   // NM109 is up to 80 characters.
-  return x12Safe(
-    ids.find((i) => /npi/i.test(String(i?.system || '')))?.value ||
-    ids[0]?.value ||
-    '1234567890'
-  ).slice(0, 80);
+  return x12Safe(firstText(ids.find((i) => /npi/i.test(textOf(i?.system)))?.value, ids[0]?.value, '1234567890')).slice(0, 80);
 }
 
 export function getReceiverId(vendor) {

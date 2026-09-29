@@ -15,7 +15,7 @@ const PREINGESTED_PATH = path.join(process.cwd(), 'data', 'preIngestedRules.json
 /**
  * POST /api/commit-rules
  *
- * Merges incoming staged rules into:
+ * Inserts new staged rules (existing keys are left as they are) into:
  *   1. database.json (active CRD memory)
  *   2. data/preIngestedRules.json (canonical on-disk snapshot)
  *
@@ -104,15 +104,15 @@ export async function POST(request) {
       addedActive++;
     }
   }
-  // The snapshot's size after this commit, worked out before any write.
-  let snapshotKeys = new Set();
+  // The snapshot is read once. Its size after this commit is worked out
+  // before any write.
+  let snapFromDisk = null;
   try {
-    if (fs.existsSync(PREINGESTED_PATH)) {
-      snapshotKeys = new Set((JSON.parse(fs.readFileSync(PREINGESTED_PATH, 'utf8')).rules || []).map(keyOf));
-    }
+    if (fs.existsSync(PREINGESTED_PATH)) snapFromDisk = JSON.parse(fs.readFileSync(PREINGESTED_PATH, 'utf8'));
   } catch {
     // An unreadable snapshot is handled by the write below.
   }
+  const snapshotKeys = new Set((snapFromDisk?.rules || []).map(keyOf));
   const snapshotAfter = snapshotKeys.size + new Set(incoming.map(keyOf).filter((k) => !snapshotKeys.has(k))).size;
   if (activeByKey.size > MAX_TOTAL_RULES || snapshotAfter > MAX_TOTAL_RULES) {
     return NextResponse.json(
@@ -128,12 +128,8 @@ export async function POST(request) {
   let addedSnapshot = 0;
   let perFile = [];
   try {
-    let snap;
-    if (fs.existsSync(PREINGESTED_PATH)) {
-      snap = JSON.parse(fs.readFileSync(PREINGESTED_PATH, 'utf8'));
-    } else {
-      snap = { perFile: [], totalRules: 0, rules: [] };
-    }
+    if (fs.existsSync(PREINGESTED_PATH) && !snapFromDisk) throw new Error('the snapshot on disk could not be parsed');
+    const snap = snapFromDisk || { perFile: [], totalRules: 0, rules: [] };
     const snapByKey = new Map();
     for (const r of (snap.rules || [])) if (!snapByKey.has(keyOf(r))) snapByKey.set(keyOf(r), r);
 
@@ -168,7 +164,7 @@ export async function POST(request) {
       if (!existing && existingByName.size >= MAX_PER_FILE_ENTRIES) continue;
       const newTotal = countBySource.get(name) || 0;
       if (existing) {
-        existing.added = newTotal;
+        // added stays the extraction's own figure. total is the count now.
         existing.total = newTotal;
         existing.label = info.label;
       } else {

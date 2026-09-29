@@ -131,13 +131,17 @@ async function extract(form) {
       }, { status: 503 });
     }
 
+    // Exit 3 from the extractor: pdfplumber could not open the file.
+    if (result.code === 3) {
+      logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', `${filename}: not a readable PDF`);
+      return NextResponse.json({ error: 'the file could not be read as a PDF' }, { status: 422 });
+    }
     if (result.code !== 0) {
       logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', `exit ${result.code}: ${result.stderr.slice(-300)}`);
       return NextResponse.json({
         error: 'extractor exited non-zero',
         exitCode: result.code,
-        stderr: result.stderr.slice(-1000),
-        hint: result.stderr.includes('pdfplumber') ? 'install pdfplumber: pip install pdfplumber' : undefined
+        hint: /ModuleNotFoundError.*pdfplumber/.test(result.stderr) ? 'install pdfplumber: pip install pdfplumber' : undefined
       }, { status: 500 });
     }
 

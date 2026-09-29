@@ -182,20 +182,22 @@ async function handlePOST(request) {
 
   // Accept either a CDS-Hooks-shaped payload or the simulator's relaxed shape.
   const str = (v, max = 64) => (typeof v === 'string' && v && v.length <= max ? v : null);
-  const orderedCode = str(body.code) || str(body.serviceCode);
-  const serviceCategory = str(body.serviceCategory, 200);
-  const planType = str(body.planType);
-  const patient = body.patient || body.patientResource || null;
-  // Ids go into Patient/ and Coverage/ references, so only FHIR ids.
-  const fhirId = (v) => (typeof v === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(v) ? v : null);
-  const patientId = fhirId(patient?.id) || fhirId(body.patientId) || 'unknown';
-  const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || 'unknown';
-  const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
-  const practitionerNpi = str(body.practitionerNpi) || str(body.npi);
   // CDS Hooks order-sign sends the order in context.draftOrders. When it
   // is there, the coverage-information update targets that order's id.
   const draftOrder = Array.isArray(body.context?.draftOrders?.entry) ? body.context.draftOrders.entry[0]?.resource : null;
   const draftOrderId = typeof draftOrder?.id === 'string' ? draftOrder.id : null;
+  // The sandbox EHR sends code and patientId at the top level. A CDS Hooks
+  // client sends them in context (draftOrders, patientId) and prefetch.
+  const orderedCode = str(body.code) || str(body.serviceCode) || str(draftOrder?.code?.coding?.[0]?.code);
+  const serviceCategory = str(body.serviceCategory, 200);
+  const planType = str(body.planType);
+  const patient = body.patient || body.patientResource || body.prefetch?.patient || null;
+  // Ids go into Patient/ and Coverage/ references, so only FHIR ids.
+  const fhirId = (v) => (typeof v === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(v) ? v : null);
+  const patientId = fhirId(patient?.id) || fhirId(body.patientId) || fhirId(body.context?.patientId) || 'unknown';
+  const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || 'unknown';
+  const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
+  const practitionerNpi = str(body.practitionerNpi) || str(body.npi);
 
   logTransaction(
     'CRD Gateway',

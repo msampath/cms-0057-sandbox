@@ -3,15 +3,29 @@
     "ELM JSON for MRIBrainPrepopulation.cql, hand-authored.",
     "The public CQL-to-ELM translation service (cqframework.dev, alphora, hapi) was unreachable when this was written; the Java translator is the reference implementation but is not committed here.",
     "Runtime consumer: lib/cql.js, via cql-execution v3 against FHIR R4 Patient bundles from cql-exec-fhir.",
-    "When this file is regenerated with the Java translator, expect additional 'annotation', 'sourceLocator', and 'localId' fields -- runtime behavior is the same either way."
+    "HasRelevantNeuroCondition is the full filter from the CQL: an active Condition (clinicalStatus coding 'active') with an ICD-10-CM coding that starts with G or R. FHIR primitives are read through '.value' paths, which is what FHIRHelpers does in translator output. scripts/testElm.mjs checks it against positive and negative cases.",
+    "When this file is regenerated with the Java translator, expect FHIRHelpers calls plus 'annotation', 'sourceLocator', and 'localId' fields. Run scripts/testElm.mjs after regenerating."
   ],
   "library": {
-    "identifier": { "id": "MRIBrainPrepopulation", "version": "1.0.0" },
-    "schemaIdentifier": { "id": "urn:hl7-org:elm", "version": "r1" },
+    "identifier": {
+      "id": "MRIBrainPrepopulation",
+      "version": "1.0.0"
+    },
+    "schemaIdentifier": {
+      "id": "urn:hl7-org:elm",
+      "version": "r1"
+    },
     "usings": {
       "def": [
-        { "localIdentifier": "System", "uri": "urn:hl7-org:elm-types:r1" },
-        { "localIdentifier": "FHIR", "uri": "http://hl7.org/fhir", "version": "4.0.1" }
+        {
+          "localIdentifier": "System",
+          "uri": "urn:hl7-org:elm-types:r1"
+        },
+        {
+          "localIdentifier": "FHIR",
+          "uri": "http://hl7.org/fhir",
+          "version": "4.0.1"
+        }
       ]
     },
     "statements": {
@@ -43,7 +57,10 @@
                   "source": {
                     "path": "name",
                     "type": "Property",
-                    "source": { "name": "Patient", "type": "ExpressionRef" }
+                    "source": {
+                      "name": "Patient",
+                      "type": "ExpressionRef"
+                    }
                   }
                 }
               },
@@ -67,7 +84,10 @@
               "source": {
                 "path": "name",
                 "type": "Property",
-                "source": { "name": "Patient", "type": "ExpressionRef" }
+                "source": {
+                  "name": "Patient",
+                  "type": "ExpressionRef"
+                }
               }
             }
           }
@@ -79,7 +99,10 @@
           "expression": {
             "path": "birthDate",
             "type": "Property",
-            "source": { "name": "Patient", "type": "ExpressionRef" }
+            "source": {
+              "name": "Patient",
+              "type": "ExpressionRef"
+            }
           }
         },
         {
@@ -89,7 +112,10 @@
           "expression": {
             "path": "gender",
             "type": "Property",
-            "source": { "name": "Patient", "type": "ExpressionRef" }
+            "source": {
+              "name": "Patient",
+              "type": "ExpressionRef"
+            }
           }
         },
         {
@@ -99,9 +125,127 @@
           "expression": {
             "type": "Exists",
             "operand": {
-              "dataType": "{http://hl7.org/fhir}Condition",
-              "templateId": "http://hl7.org/fhir/StructureDefinition/Condition",
-              "type": "Retrieve"
+              "type": "Query",
+              "source": [
+                {
+                  "alias": "C",
+                  "expression": {
+                    "type": "Retrieve",
+                    "dataType": "{http://hl7.org/fhir}Condition",
+                    "templateId": "http://hl7.org/fhir/StructureDefinition/Condition"
+                  }
+                }
+              ],
+              "relationship": [],
+              "where": {
+                "type": "And",
+                "operand": [
+                  {
+                    "type": "Exists",
+                    "operand": {
+                      "type": "Query",
+                      "source": [
+                        {
+                          "alias": "S",
+                          "expression": {
+                            "type": "Property",
+                            "path": "clinicalStatus.coding",
+                            "scope": "C"
+                          }
+                        }
+                      ],
+                      "relationship": [],
+                      "where": {
+                        "type": "Equal",
+                        "operand": [
+                          {
+                            "type": "Property",
+                            "path": "code.value",
+                            "scope": "S"
+                          },
+                          {
+                            "type": "Literal",
+                            "valueType": "{urn:hl7-org:elm-types:r1}String",
+                            "value": "active"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "Exists",
+                    "operand": {
+                      "type": "Query",
+                      "source": [
+                        {
+                          "alias": "CD",
+                          "expression": {
+                            "type": "Property",
+                            "path": "code.coding",
+                            "scope": "C"
+                          }
+                        }
+                      ],
+                      "relationship": [],
+                      "where": {
+                        "type": "And",
+                        "operand": [
+                          {
+                            "type": "Equal",
+                            "operand": [
+                              {
+                                "type": "Property",
+                                "path": "system.value",
+                                "scope": "CD"
+                              },
+                              {
+                                "type": "Literal",
+                                "valueType": "{urn:hl7-org:elm-types:r1}String",
+                                "value": "http://hl7.org/fhir/sid/icd-10-cm"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "Or",
+                            "operand": [
+                              {
+                                "type": "StartsWith",
+                                "operand": [
+                                  {
+                                    "type": "Property",
+                                    "path": "code.value",
+                                    "scope": "CD"
+                                  },
+                                  {
+                                    "type": "Literal",
+                                    "valueType": "{urn:hl7-org:elm-types:r1}String",
+                                    "value": "G"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "StartsWith",
+                                "operand": [
+                                  {
+                                    "type": "Property",
+                                    "path": "code.value",
+                                    "scope": "CD"
+                                  },
+                                  {
+                                    "type": "Literal",
+                                    "valueType": "{urn:hl7-org:elm-types:r1}String",
+                                    "value": "R"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
             }
           }
         }

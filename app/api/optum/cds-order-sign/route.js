@@ -37,7 +37,7 @@ export async function POST(request) {
       'OPTUM',
       'CRD ORDER-SIGN',
       { mode: result.mode, cardCount: result.cards?.cards?.length || 0 },
-      { code: body.code, patientId: body.patientId }
+      { code: typeof body.code === 'string' ? body.code : undefined, patientId: typeof body.patientId === 'string' ? body.patientId : undefined }
     );
     return NextResponse.json(result);
   } catch (e) {

@@ -37,7 +37,7 @@ define "PatientGender":
 define "HasRelevantNeuroCondition":
   exists (
     [Condition] C
-      where C.clinicalStatus ~ 'active'
+      where exists (C.clinicalStatus.coding S where S.code = 'active')
         and exists (
           C.code.coding CD
             where CD.system = 'http://hl7.org/fhir/sid/icd-10-cm'

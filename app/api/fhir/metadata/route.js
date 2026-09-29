@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+
+// Served per request, so a CDN never holds a copy from before a redeploy.
+export const dynamic = 'force-dynamic';
 import { IG_REGISTRY, versionedCanonical } from '@/lib/fhir';
 
 /**

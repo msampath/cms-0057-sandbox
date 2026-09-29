@@ -38,7 +38,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 });
   }
   const epicPatientId = body?.epicPatientId;
-  const libraryId = typeof body?.libraryId === 'string' ? body.libraryId : body?.libraryId === undefined ? 'MRIBrainPrepopulation' : '';
+  const libraryId = typeof body?.libraryId === 'string' ? body.libraryId : body?.libraryId == null ? 'MRIBrainPrepopulation' : '';
 
   if (!epicPatientId || typeof epicPatientId !== 'string') {
     return NextResponse.json(
