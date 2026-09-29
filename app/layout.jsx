@@ -9,9 +9,9 @@ import './globals.css';
 export const revalidate = 60;
 
 export const metadata = {
-  title: 'CMS-0057-F Interoperability Sandbox',
+  title: 'CMS-0057-F and CMS-0062-P Interoperability Sandbox',
   description:
-    'A working model of the four payer FHIR APIs mandated by the CMS Interoperability and Prior Authorization final rule (CMS-0057-F), driven by real BCBSIL 2026 prior authorization grid data.'
+    'A working model of the CMS-0057-F final rule payer FHIR APIs, extended for the proposed CMS-0062-P drug prior authorization rule and driven by BCBSIL 2026 prior authorization grid data.'
 };
 
 export default function RootLayout({ children }) {
