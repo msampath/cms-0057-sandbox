@@ -142,6 +142,13 @@ Certolizumab pegol (Cimzia) is the demo drug because its real grid row (J0717, 2
 - Every PA decision log entry carries a `pa` tag (`requestId`, `category` item or drug, `benefit`, `determination`, `planType`, times, `forced`). `lib/paMetrics.js` builds the metrics from those tags, so seeded and live traffic count alike. The seed's Jane Doe approval carries one. Forced debug denials are excluded, and MA drug metrics cover Part B only
 - `GET /api/metrics` and the `/um` Registry & Metrics tab show both. Usage counters reset with the demo
 
+### CDex attachments and intermediaries (CMS-0062-P Phase 6)
+
+- A pend (15820) now waits for a document. The PAS response Bundle carries a CDex 2.1.0 attachment-request `Task` (`lib/cdex.js`: `code` is `attachment-request-code` from PAS's `PASTempCodes`, tracking-id, contained Patient and PractitionerRole, `payer-url` input). The pending entry has `awaitingAttachment: true` and `finalizePendedIfDue()` leaves it pended
+- `POST /api/cdex/$submit-attachment` validates the Parameters (TrackingId, AttachTo, MemberId, ProviderId or OrganizationId, Attachment with one Content, Final) and, on a final submission, starts the 8-second review window. The next poll finalizes. 400 invalid, 404 unknown TrackingId, 409 already finalized. The `/ehr` pended panel has a "Submit requested attachment" button
+- `POST /api/clearinghouse/pas` is a simulated clearinghouse in front of PAS (`lib/clearinghouse.js`): the Bundle must claim the PAS request profile, a versioned profile must be the sandbox's PAS version or the 170.215 version until the proposed 2028 expiry, and a Claim and Patient must be present. Failures get a 422 OperationOutcome and never reach the payer. `/ehr` has a clearinghouse toggle and a debug option to claim PAS 1.1.0
+- The `/ehr` PAS request Bundle now claims the versioned profile from `IG_REGISTRY`
+
 ### Rule Ingestion Pipeline (`app/api/extract/`, `app/api/commit-rules/`, `scripts/extractPreIngested.py`)
 
 1. Upload PA grid PDF via `/um` UI

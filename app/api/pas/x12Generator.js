@@ -36,7 +36,7 @@ function pickServiceTypeCode(rule, orderedCode) {
 }
 
 function pickEntry(bundle, resourceType) {
-  if (!bundle?.entry) return null;
+  if (!Array.isArray(bundle?.entry)) return null;
   const hit = bundle.entry.find((e) => e?.resource?.resourceType === resourceType);
   return hit ? hit.resource : null;
 }

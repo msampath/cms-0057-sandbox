@@ -18,6 +18,8 @@ import {
 } from '@/lib/fhir';
 import { reviewWindow } from '@/lib/pendedReview';
 import { getPatient } from '@/lib/patients';
+import { buildAttachmentRequestTask, ATTACHMENT_NEEDED } from '@/lib/cdex';
+import { apiBase } from '@/lib/origin';
 import { decisionClock, formatClockHours } from '@/lib/decisionClock';
 import {
   generateX12_278,
@@ -42,7 +44,7 @@ import { withUsage } from '@/lib/withUsage';
  */
 
 function pickEntry(bundle, type) {
-  if (!bundle?.entry) return null;
+  if (!Array.isArray(bundle?.entry)) return null;
   const hit = bundle.entry.find((e) => e?.resource?.resourceType === type);
   return hit ? hit.resource : null;
 }
@@ -82,7 +84,7 @@ function findRule(rules, orderedCode, serviceCategory) {
   return null;
 }
 
-async function handlePOST(request) {
+export async function handlePOST(request) {
   const bundle = await request.json();
 
   const claim = pickEntry(bundle, 'Claim');
@@ -312,7 +314,7 @@ async function handlePOST(request) {
       // PAS binds outcome to complete | error | partial. A pend is a
       // completed adjudication whose review action is A4.
       outcome: 'complete',
-      disposition: `Prior authorization request is pending clinical review for functional impairment determination. ${
+      disposition: `Prior authorization request is pending clinical review for functional impairment determination. Additional documentation requested (CDex attachment request). ${
         clock.applies
           ? `Decision due within ${formatClockHours(clock.hours)} (${clock.kind}, ${clock.basis}).`
           : 'No federal decision clock applies to this coverage.'
@@ -351,8 +353,34 @@ async function handlePOST(request) {
       planType,
       receivedAt,
       category: drugKey ? 'drug' : 'item',
-      decideAfter: Date.now() + reviewWindow(),
+      // Decided only after the requested attachment arrives (CDex).
+      awaitingAttachment: true,
+      decideAfter: null,
     });
+
+    // CDex 2.1.0 solicited attachment: the pend asks the provider for the
+    // documentation it needs, as an attachment-request Task returned in the
+    // PAS response Bundle. The provider answers with $submit-attachment.
+    const member = getPatient(patient?.id);
+    const practitionerNpi =
+      pickEntry(bundle, 'Practitioner')?.identifier?.find((i) => i.system === 'http://hl7.org/fhir/sid/us-npi')?.value ||
+      member?.npi ||
+      'unknown';
+    const cdexTask = buildAttachmentRequestTask({
+      authNumber,
+      patient: {
+        memberId: member?.subscriberId || patient?.id || 'unknown',
+        family: member?.family || patient?.name?.[0]?.family || 'Unknown',
+        given: member?.given || patient?.name?.[0]?.given || []
+      },
+      practitionerNpi,
+      payerUrl: `${apiBase(request)}/cdex/$submit-attachment`,
+      dueAt: clock.applies ? clock.dueAt : new Date(Date.now() + 72 * 3600 * 1000).toISOString()
+    });
+    logTransaction('CDex Gateway', 'CDEX ATTACHMENT REQUESTED',
+      `Auth # ${authNumber}: attachment-request Task asks for LOINC ${ATTACHMENT_NEEDED.code} (${ATTACHMENT_NEEDED.display}) via $submit-attachment.\n\n${JSON.stringify(cdexTask, null, 2)}`,
+      { patientId: patient?.id || 'unknown' }
+    );
 
     logTransaction('PAS Gateway', 'PA PENDED',
       `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
@@ -363,7 +391,7 @@ async function handlePOST(request) {
       }
     );
 
-    return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse]));
+    return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse, cdexTask]));
   }
 
   // ---- Standard synchronous path (all other codes) -------------------------

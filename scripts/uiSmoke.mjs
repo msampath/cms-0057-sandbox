@@ -65,6 +65,30 @@ const STEPS = [
     expect: ['72 hours', 'proposed, not yet in effect', 'FFE issuer exception', '2028-06-30']
   },
   // Jane Doe has drug PAs from the /ehr drug steps above.
+  {
+    // MA pend with a CDex attachment request, answered from the EHR.
+    path: '/ehr',
+    name: 'CDex pend',
+    click: ['Robert Chen'],
+    // The scenario click resets the order, so the order is picked after it.
+    reselectOrder: '15820',
+    thenClick: ['Sign Order', 'Launch DTR SMART App'],
+    fillFiles: true,
+    submit: 'Submit PAS Request',
+    afterSubmitClick: ['Submit requested attachment'],
+    waitMs: 12000,
+    expect: ['Prior Authorization Approved', 'submitted attachment']
+  },
+  {
+    path: '/ehr',
+    name: 'clearinghouse rejects PAS 1.1.0',
+    click: ['Sign Order', 'Launch DTR SMART App'],
+    checkLabels: ['clearinghouse', 'claim PAS 1.1.0'],
+    fillFiles: true,
+    formText: 'Test statement.',
+    submit: 'Submit PAS Request',
+    expect: ['Rejected by the clearinghouse before reaching the payer', '1.1.0 is not accepted']
+  },
   { path: '/patient', name: 'drug PAs', click: ['Jane Doe'], expect: ['Drug prior authorizations', 'Profile: PDex Prior Authorization', 'X12 886 44'] },
   { path: '/pharmacy', click: ['Look up PA status'], expect: ['PA status for Certolizumab', 'X12 886 44', 'RTPB', 'F&B formulary'] },
   { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans'] },
@@ -143,6 +167,8 @@ for (const step of STEPS) {
       await page.getByRole('button', { name: new RegExp(`^${step.tab.replace(/[&]/g, '\\$&')}`) }).first().click();
       await page.waitForTimeout(600);
     }
+    // Order: click, selectOrder, thenClick, checkLabels, fill, submit,
+    // afterSubmitClick, wait.
     if (step.selectOrder) {
       const select = page.locator('select').nth(1);
       const value = await select.locator('option', { hasText: step.selectOrder }).first().getAttribute('value');
@@ -151,6 +177,28 @@ for (const step of STEPS) {
     for (const buttonName of step.click || []) {
       await page.getByRole('button', { name: buttonName }).first().click();
       await settle();
+    }
+    if (step.reselectOrder) {
+      const select = page.locator('select').nth(1);
+      const value = await select.locator('option', { hasText: step.reselectOrder }).first().getAttribute('value');
+      await select.selectOption(value);
+    }
+    for (const buttonName of step.thenClick || []) {
+      await page.getByRole('button', { name: buttonName }).first().click();
+      await settle();
+    }
+    for (const label of step.checkLabels || []) {
+      await page.locator('label', { hasText: label }).first().locator('input[type=checkbox]').check();
+    }
+    if (step.fillFiles) {
+      const files = page.locator('form input[type=file]');
+      for (let i = 0; i < (await files.count()); i++) {
+        await files.nth(i).setInputFiles({ name: 'doc.pdf', mimeType: 'application/pdf', buffer: Buffer.from('test') });
+      }
+    }
+    if (step.formText) {
+      const areas = page.locator('form textarea');
+      for (let i = 0; i < (await areas.count()); i++) await areas.nth(i).fill(step.formText);
     }
     // Fill the form's diagnosis select (booleans stay unchecked, which the
     // shared model decides as step therapy not met), then submit.
@@ -170,6 +218,14 @@ for (const step of STEPS) {
     if (step.submit) {
       await page.getByRole('button', { name: step.submit }).first().click();
       await settle(800, 15000);
+    }
+    for (const buttonName of step.afterSubmitClick || []) {
+      await page.getByRole('button', { name: buttonName }).first().click();
+      await settle();
+    }
+    if (step.waitMs) {
+      await page.waitForTimeout(step.waitMs);
+      await settle();
     }
     // Let in-flight requests settle so a slow 404 is charged to this step
     // instead of being cleared when the next step starts.

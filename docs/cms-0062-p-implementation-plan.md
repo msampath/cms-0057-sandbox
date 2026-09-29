@@ -344,8 +344,8 @@ This phase implements position 4.
 This phase extends position 5 beyond the Phase 1 transition view. Do this only after Phases 0 to 5 are live.
 
 - CDex 2.1.0 solicited attachment:
-  - A pended PAS decision emits a CDex `Task` with `attachment-request-code`. Confirm its code system before building. The reviewers disagreed between CDex `cdex-temp` and PAS `PASTempCodes`
-  - The EHR answers with `POST /api/cdex/submit-attachment`, a `Parameters` body with `AttachTo`, `TrackingId`, `PayerId`, `OrganizationId`, `ProviderId`, `MemberId`, `ServiceDate`, `Attachment`, and `Final`
+  - A pended PAS decision emits a CDex `Task` with `attachment-request-code`. The CDex 2.1.0 Task Attachment Request profile fixes its code system as PAS's `PASTempCodes` (checked on hl7.org during the build)
+  - The EHR answers with `POST /api/cdex/$submit-attachment` (a system-level operation in CDex), a `Parameters` body with `AttachTo`, `TrackingId`, `PayerId`, `OrganizationId`, `ProviderId`, `MemberId`, `ServiceDate`, `Attachment`, and `Final`
   - The pended request re-adjudicates
 - Intermediary conformance:
   - A simulated clearinghouse hop that validates the PAS Bundle against the Phase 1 version registry before forwarding

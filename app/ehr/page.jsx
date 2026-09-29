@@ -2,7 +2,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
-import { PAS_PROFILES, readReviewAction } from '@/lib/fhir';
+import { PAS_PROFILES, readReviewAction, versionedCanonical } from '@/lib/fhir';
+import { buildSubmitAttachmentParameters } from '@/lib/cdex';
 import PharmacyEpa, { SharedRecord } from './pharmacyEpa';
 import ClockBadge from '@/app/components/ClockBadge';
 import { decisionClock } from '@/lib/decisionClock';
@@ -435,6 +436,15 @@ export default function EhrDashboard() {
   const [drugRecord, setDrugRecord] = useState(null);
   const pasReview = readReviewAction(pasResponse);
   const [pendedId, setPendedId] = useState(null);
+  // CDex attachment request that came with a pend, and the provider's
+  // $submit-attachment result.
+  const [cdexTask, setCdexTask] = useState(null);
+  const [attachmentResult, setAttachmentResult] = useState(null);
+  // Route PAS through the simulated clearinghouse (conformance check), and
+  // optionally claim an unsupported PAS version to see it rejected.
+  const [viaClearinghouse, setViaClearinghouse] = useState(false);
+  const [outdatedPas, setOutdatedPas] = useState(false);
+  const [clearinghouseRejection, setClearinghouseRejection] = useState(null);
   const [wasPended, setWasPended] = useState(false);
   const [launchedSession, setLaunchedSession] = useState(null);
   const [launchedPatient, setLaunchedPatient] = useState(null);
@@ -538,6 +548,11 @@ export default function EhrDashboard() {
     scenarioVersionRef.current += 1;
     setPasSentAt(null);
     setPasDecidedAt(null);
+    setCdexTask(null);
+    setAttachmentResult(null);
+    setClearinghouseRejection(null);
+    // Per-order debug lever, like the denial and hard-stop toggles.
+    setOutdatedPas(false);
     setPharmacyRun(0);
     setDrugPrefillFrom(null);
     setDrugRecord(null);
@@ -623,6 +638,11 @@ export default function EhrDashboard() {
     setExpedited(false);
     setPasSentAt(null);
     setPasDecidedAt(null);
+    setCdexTask(null);
+    setAttachmentResult(null);
+    setClearinghouseRejection(null);
+    setViaClearinghouse(false);
+    setOutdatedPas(false);
     // Reset debug toggles too -- hardStopFlag is a per-order-attempt
     // sandbox lever, not a persistent user preference. Carrying it
     // forward would silently trip a hard-stop CDS response on a
@@ -716,6 +736,7 @@ export default function EhrDashboard() {
   // ---- Phase 2: Sign Order → CDS Hook fires ------------------------------
   const signOrder = async () => {
     setCard(null);
+    setClearinghouseRejection(null);
     setSystemAction(null);
     setShowDtr(false);
     setPasResponse(null);
@@ -981,7 +1002,11 @@ export default function EhrDashboard() {
 
     const bundle = {
       resourceType: 'Bundle',
-      meta: { profile: [PAS_PROFILES.requestBundle] },
+      // Versioned profile (Phase 1 registry). The debug option claims PAS
+      // 1.1.0, which the clearinghouse rejects.
+      meta: {
+        profile: [outdatedPas ? `${PAS_PROFILES.requestBundle}|1.1.0` : versionedCanonical(PAS_PROFILES.requestBundle, 'pas')]
+      },
       type: 'collection',
       entry: [
         { resource: patient },
@@ -1015,8 +1040,11 @@ export default function EhrDashboard() {
     // Optum's real, independent implementation of the same Da Vinci PAS
     // operation. The Availity clearinghouse call is a pre-order
     // eligibility check now, fired earlier in signOrder() -- see there.
+    setClearinghouseRejection(null);
+    setCdexTask(null);
+    setAttachmentResult(null);
     const [pasResult, optumResp] = await Promise.allSettled([
-      fetch(apiUrl('/api/pas/submit'), {
+      fetch(apiUrl(viaClearinghouse ? '/api/clearinghouse/pas' : '/api/pas/submit'), {
         method: 'POST',
         body: JSON.stringify(bundle)
       }).then((r) => r.json()),
@@ -1032,10 +1060,16 @@ export default function EhrDashboard() {
     if (pasResult.status === 'fulfilled') {
       const data = pasResult.value;
       const { claimResponse, task } = extractPasResponse(data);
-      if (readReviewAction(claimResponse)?.actionCode === 'A4') {
+      if (data?.resourceType === 'OperationOutcome') {
+        // The clearinghouse rejected the Bundle before it reached the payer.
+        setClearinghouseRejection(data);
+        setPasResponse(null);
+      } else if (readReviewAction(claimResponse)?.actionCode === 'A4') {
         setPendedId(claimResponse.preAuthRef);
         setPasResponse(claimResponse);
         setPasDecidedAt(null);
+        // The pend's CDex attachment request travels in the same Bundle.
+        setCdexTask(task?.code?.coding?.[0]?.code === 'attachment-request-code' ? task : null);
       } else {
         setPasResponse(claimResponse);
         setPasDecidedAt(new Date().toISOString());
@@ -1499,6 +1533,23 @@ export default function EhrDashboard() {
             <strong>Expedited</strong> request (urgent). Selects the expedited decision clock.
           </span>
         </label>
+        <label className="flex items-center gap-2 text-sm text-gray-700 mb-2 -mt-2">
+          <input
+            type="checkbox"
+            checked={viaClearinghouse}
+            onChange={(e) => { setViaClearinghouse(e.target.checked); if (!e.target.checked) setOutdatedPas(false); }}
+            className="w-4 h-4"
+          />
+          <span>
+            Route PAS through a <strong>clearinghouse</strong> that checks conformance and PAS version first.
+          </span>
+        </label>
+        {viaClearinghouse && (
+          <label className="flex items-center gap-2 text-sm text-gray-700 mb-4 ml-6">
+            <input type="checkbox" checked={outdatedPas} onChange={(e) => setOutdatedPas(e.target.checked)} className="w-4 h-4" />
+            <span><strong>Debug:</strong> claim PAS 1.1.0, which is not an accepted version</span>
+          </label>
+        )}
 
         <button
           onClick={signOrder}
@@ -1908,9 +1959,63 @@ export default function EhrDashboard() {
             Sent to: <strong>{pasResponse?.insurer?.display}</strong>
           </div>
           <div className="text-sm mt-2 text-amber-800">{pasResponse?.disposition}</div>
+          {cdexTask && (
+            <div className="mt-3 bg-white border border-amber-300 rounded p-3 text-sm">
+              <div className="font-semibold">CDex attachment request (Task {cdexTask.id})</div>
+              <div className="text-xs text-amber-900 mt-1">
+                Needed:{' '}
+                {(cdexTask.input || [])
+                  .filter((i) => i.type?.coding?.[0]?.code === 'attachments-needed')
+                  .map((i) => `LOINC ${i.valueCodeableConcept?.coding?.[0]?.code} ${i.valueCodeableConcept?.coding?.[0]?.display}`)
+                  .join(', ')}{' '}
+                · due {cdexTask.restriction?.period?.end ? new Date(cdexTask.restriction.period.end).toLocaleString() : '-'}
+              </div>
+              {attachmentResult && (
+                <div className={`text-xs mt-2 ${attachmentResult.ok ? 'text-green-800' : 'text-red-700'}`}>{attachmentResult.text}</div>
+              )}
+              {!attachmentResult?.ok && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Answer with the member id the payer put in the Task, so
+                    // Epic sandbox patients (not in lib/patients.js) match too.
+                    const myVersion = scenarioVersionRef.current;
+                    const params = buildSubmitAttachmentParameters({
+                      authNumber: pendedId,
+                      memberId:
+                        cdexTask.contained?.find((c) => c.resourceType === 'Patient')?.identifier?.[0]?.value ||
+                        scenario.subscriberId ||
+                        scenario.patientId,
+                      practitionerNpi: scenario.npi
+                    });
+                    const res = await fetch(apiUrl('/api/cdex/$submit-attachment'), {
+                      method: 'POST',
+                      body: JSON.stringify(params)
+                    });
+                    const json = await res.json().catch(() => ({}));
+                    // Drop the result if the scenario or order changed meanwhile.
+                    if (scenarioVersionRef.current !== myVersion) return;
+                    setAttachmentResult({ ok: res.ok, text: json?.issue?.[0]?.diagnostics || `HTTP ${res.status}` });
+                  }}
+                  className="mt-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded"
+                >
+                  {attachmentResult ? 'Retry' : 'Submit requested attachment'} (CDex $submit-attachment)
+                </button>
+              )}
+            </div>
+          )}
           <div className="text-xs mt-2 text-amber-700 bg-amber-100 px-2 py-1 rounded font-mono">
             rest-hook notification (R4 Subscriptions Backport) will fire to this EHR when the determination is finalized.
           </div>
+        </div>
+      )}
+
+      {clearinghouseRejection && (
+        <div className="bg-orange-50 border-2 border-orange-600 text-orange-900 px-6 py-4 rounded-lg shadow-sm mt-6 max-w-3xl">
+          <div className="font-bold text-lg mb-1">✗ Rejected by the clearinghouse before reaching the payer</div>
+          {(clearinghouseRejection.issue || []).map((i, n) => (
+            <div key={n} className="text-sm">{i.severity}: {i.diagnostics}</div>
+          ))}
         </div>
       )}
 

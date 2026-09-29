@@ -117,10 +117,21 @@ async function baseline() {
   check('validation 278 has AAA*N**15*C', String(errors[0]?.details || '').includes('AAA*N**15*C'));
 
   console.log('\nPended finalization (request-driven, ~8s window)');
+  // Since Phase 6 a pend waits for the CDex attachment it requested.
+  await post('/api/cdex/$submit-attachment', {
+    resourceType: 'Parameters',
+    parameter: [
+      { name: 'TrackingId', valueIdentifier: { value: pend?.preAuthRef } },
+      { name: 'AttachTo', valueCode: 'preauthorization' },
+      { name: 'ProviderId', valueIdentifier: { value: '1234567890' } },
+      { name: 'MemberId', valueIdentifier: { value: 'BCBSIL-MEM-849' } },
+      { name: 'Attachment', part: [{ name: 'Content', resource: { resourceType: 'DocumentReference', status: 'current', content: [{ attachment: { data: 'dGVzdA==' } }] } }] }
+    ]
+  });
   await sleep(8500);
   const fin = await call(`/api/pas/pended/${pend?.preAuthRef}`);
   const finCr = fin.json?.responseBundle?.entry?.[0]?.resource;
-  check('pended request finalizes to A1', fin.status === 200 && review(finCr)?.action === 'A1', fin.json?.status);
+  check('pended request finalizes to A1 after its attachment', fin.status === 200 && review(finCr)?.action === 'A1', fin.json?.status);
 
   console.log('\nSMART auth and access APIs');
   const noTok = await call('/api/patient-access?patientId=pat-8849-jane-doe');
@@ -463,8 +474,106 @@ async function phase5() {
   check('drugs requiring PA: grid J-code rules counted', m1?.drugsRequiringPa?.gridJCodeRules > 0 && m1.drugsRequiringPa.catalog.length === 1);
 }
 
+function attachmentParams(authNumber, { omit = [], final = true } = {}) {
+  const p = [
+    { name: 'TrackingId', valueIdentifier: { value: authNumber } },
+    { name: 'AttachTo', valueCode: 'preauthorization' },
+    { name: 'ProviderId', valueIdentifier: { system: 'http://hl7.org/fhir/sid/us-npi', value: '1234567890' } },
+    // The regression pend is for Jane Doe (pasBundle).
+    { name: 'MemberId', valueIdentifier: { value: 'BCBSIL-MEM-849' } },
+    {
+      name: 'Attachment',
+      part: [
+        { name: 'LineItem', valueString: '1' },
+        { name: 'Code', valueCodeableConcept: { coding: [{ system: 'http://loinc.org', code: '11506-3' }] } },
+        { name: 'Content', resource: { resourceType: 'DocumentReference', status: 'current', content: [{ attachment: { contentType: 'text/plain', data: 'dGVzdA==' } }] } }
+      ]
+    },
+    { name: 'Final', valueBoolean: final }
+  ];
+  return { resourceType: 'Parameters', parameter: p.filter((x) => !omit.includes(x.name)) };
+}
+
+async function phase6() {
+  console.log('\nPhase 6: CDex attachments and intermediaries');
+  const res = (await post('/api/pas/submit', pasBundle('15820', {}, 'MA-PPO'))).json;
+  const cr = res?.entry?.[0]?.resource;
+  const task = res?.entry?.map((e) => e.resource).find((r) => r.resourceType === 'Task');
+  const auth = cr?.preAuthRef;
+  check('pend returns a CDex attachment-request Task (PASTempCodes attachment-request-code)',
+    task?.code?.coding?.[0]?.system === 'http://hl7.org/fhir/us/davinci-pas/CodeSystem/PASTempCodes' && task?.code?.coding?.[0]?.code === 'attachment-request-code');
+  check('Task carries tracking-id, contained Patient and PractitionerRole, requester payer id, reason',
+    task?.identifier?.[0]?.value === auth && task?.identifier?.[0]?.type?.coding?.[0]?.code === 'tracking-id' &&
+    task?.contained?.some((c) => c.id === 'patient') && task?.contained?.some((c) => c.id === 'practitionerrole') &&
+    task?.for?.reference === '#patient' && task?.owner?.reference === '#practitionerrole' && !!task?.requester?.identifier?.value &&
+    task?.reasonCode?.coding?.[0]?.code === 'preauthorization' && task?.reasonReference?.identifier?.value === auth);
+  const payerUrl = task?.input?.find((i) => i.type?.coding?.[0]?.code === 'payer-url')?.valueUrl;
+  check('Task payer-url is absolute and points at $submit-attachment', /^https?:\/\/.+\/cms-0057\/api\/cdex\/\$submit-attachment$/.test(payerUrl || ''), payerUrl);
+
+  await sleep(8500);
+  const waiting = (await call('/api/pas/pended/' + auth)).json;
+  check('pend waits for the attachment (no auto-finalize)', waiting?.status === 'pended', waiting?.status);
+
+  const bad = await post('/api/cdex/$submit-attachment', attachmentParams(auth, { omit: ['MemberId'] }));
+  check('$submit-attachment without MemberId → 400', bad.status === 400 && /MemberId/.test(bad.json?.issue?.[0]?.diagnostics || ''));
+  const noProv = await post('/api/cdex/$submit-attachment', attachmentParams(auth, { omit: ['ProviderId'] }));
+  check('$submit-attachment without ProviderId or OrganizationId → 400', noProv.status === 400);
+  const dupAttachTo = attachmentParams(auth);
+  dupAttachTo.parameter.push({ name: 'AttachTo', valueCode: 'claim' });
+  const dup = await post('/api/cdex/$submit-attachment', dupAttachTo);
+  check('$submit-attachment with two AttachTo → 400', dup.status === 400);
+  const unknown = await post('/api/cdex/$submit-attachment', attachmentParams('AUTH-NOPE'));
+  check('$submit-attachment for an unknown TrackingId → 404', unknown.status === 404);
+  const notFinal = await post('/api/cdex/$submit-attachment', attachmentParams(auth, { final: false }));
+  check('non-final attachment accepted, request keeps waiting', notFinal.status === 200 && (await call('/api/pas/pended/' + auth)).json?.status === 'pended');
+  const wrongMember = await post('/api/cdex/$submit-attachment', {
+    ...attachmentParams(auth),
+    parameter: attachmentParams(auth).parameter.map((p) => (p.name === 'MemberId' ? { name: 'MemberId', valueIdentifier: { value: 'BCBSIL-MEM-712' } } : p))
+  });
+  check('attachment for a different member → 422', wrongMember.status === 422);
+  const ok = await post('/api/cdex/$submit-attachment', attachmentParams(auth));
+  check('final attachment accepted (200 OperationOutcome)', ok.status === 200 && ok.json?.resourceType === 'OperationOutcome');
+  const during = await post('/api/cdex/$submit-attachment', attachmentParams(auth));
+  check('another attachment during review → 409 (window not restarted)', during.status === 409);
+  await sleep(8500);
+  const fin = (await call('/api/pas/pended/' + auth)).json;
+  const finCr = fin?.responseBundle?.entry?.[0]?.resource;
+  check('re-adjudicated after the review window → A1 citing the attachment', fin?.status === 'finalized' && review(finCr)?.action === 'A1' && /submitted attachment/.test(finCr?.disposition || ''));
+  const again = await post('/api/cdex/$submit-attachment', attachmentParams(auth));
+  check('attachment after finalization → 409', again.status === 409);
+
+  // Clearinghouse conformance hop.
+  const pasProfile = 'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-pas-request-bundle';
+  const withProfile = (p) => ({ ...pasBundle('70553'), meta: p ? { profile: [p] } : undefined });
+  const good = await post('/api/clearinghouse/pas', withProfile(pasProfile + '|2.2.1'));
+  check('clearinghouse forwards a PAS 2.2.1 Bundle to the payer → A1', good.status === 200 && review(good.json?.entry?.[0]?.resource)?.action === 'A1');
+  const prior = await post('/api/clearinghouse/pas', withProfile(pasProfile + '|2.0.1'));
+  check('clearinghouse accepts PAS 2.0.1 (in 170.215 until the proposed 2028 expiry)', prior.status === 200);
+  const old = await post('/api/clearinghouse/pas', withProfile(pasProfile + '|1.1.0'));
+  check('clearinghouse rejects PAS 1.1.0 with a 422 OperationOutcome', old.status === 422 && /1\.1\.0/.test(old.json?.issue?.[0]?.diagnostics || ''));
+  const objEntry = await post('/api/clearinghouse/pas', { resourceType: 'Bundle', type: 'collection', meta: { profile: [pasProfile + '|2.2.1'] }, entry: { resource: { resourceType: 'Claim' } } });
+  check('clearinghouse: non-array entry → 422, not 500', objEntry.status === 422);
+  const objPas = await post('/api/pas/submit', { resourceType: 'Bundle', type: 'collection', entry: { resource: { resourceType: 'Claim' } } });
+  check('PAS: non-array entry → validation error ClaimResponse, not 500', objPas.status === 200 && objPas.json?.entry?.[0]?.resource?.outcome === 'error');
+  const objAtt = await post('/api/cdex/$submit-attachment', { resourceType: 'Parameters', parameter: { name: 'TrackingId' } });
+  check('$submit-attachment: non-array parameter → 400, not 500', objAtt.status === 400);
+  const none = await post('/api/clearinghouse/pas', withProfile(null));
+  check('clearinghouse rejects a Bundle without the PAS profile', none.status === 422);
+  const unversioned = await post('/api/clearinghouse/pas', withProfile(pasProfile));
+  check('clearinghouse forwards an unversioned profile (warning only)', unversioned.status === 200);
+  // A client that sends a content-length for pretty-printed JSON still works.
+  const pretty = JSON.stringify(withProfile(pasProfile + '|2.2.1'), null, 2);
+  const prettyRes = await fetch(BASE + '/api/clearinghouse/pas', { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(pretty)) }, body: pretty });
+  check('clearinghouse forwards pretty-printed JSON', prettyRes.status === 200);
+  const m = (await call('/api/metrics')).json;
+  const ch = m?.usage?.find((u) => u.api === 'Clearinghouse');
+  check('clearinghouse calls are metered under Clearinghouse', ch?.total >= 6, JSON.stringify(ch));
+  const rejLog = await logsFor(/^CLEARINGHOUSE REJECTED$/);
+  check('rejections are logged to the feed', rejLog.length >= 2);
+}
+
 // Phase checks are appended below as each phase lands.
-const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5];
+const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5, phase6];
 
 console.log(`Regression against ${BASE}`);
 for (const phase of PHASES) await phase();
