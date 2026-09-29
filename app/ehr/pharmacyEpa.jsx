@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '@/lib/basePath';
 import { DRUG_CATALOG } from '@/lib/drugPa';
+import ClockBadge from '@/app/components/ClockBadge';
 
 /**
  * Pharmacy-benefit drug track: RTPB → F&B → NCPDP SCRIPT ePA, routed to
@@ -9,13 +10,14 @@ import { DRUG_CATALOG } from '@/lib/drugPa';
  * model (lib/drugPa.js) the medical PAS track uses, and answers already
  * given on the medical track are carried over from the shared record.
  */
-export default function PharmacyEpa({ drugKey, patientId, prescriberNpi }) {
+export default function PharmacyEpa({ drugKey, patientId, prescriberNpi, planType, expedited = false }) {
   const drug = DRUG_CATALOG[drugKey];
   const [benefit, setBenefit] = useState(null);
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [applyException, setApplyException] = useState(false);
   // Guards the submit handler's state writes after an unmount (scenario or
   // order switched while PARequest was in flight).
   const mounted = useRef(true);
@@ -25,7 +27,7 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi }) {
     let live = true;
     fetch(apiUrl('/api/drug-pa/pharmacy'), {
       method: 'POST',
-      body: JSON.stringify({ step: 'benefit', drugKey, patientId, prescriberNpi })
+      body: JSON.stringify({ step: 'benefit', drugKey, patientId, prescriberNpi, planType, expedited })
     })
       .then((r) => r.json())
       .then((json) => {
@@ -39,7 +41,7 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi }) {
     return () => {
       live = false;
     };
-  }, [drugKey, patientId, prescriberNpi]);
+  }, [drugKey, patientId, prescriberNpi, planType, expedited]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -48,7 +50,19 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi }) {
     try {
       const res = await fetch(apiUrl('/api/drug-pa/pharmacy'), {
         method: 'POST',
-        body: JSON.stringify({ step: 'submit', drugKey, patientId, prescriberNpi, caseId: benefit.caseId, answers })
+        body: JSON.stringify({
+          step: 'submit',
+          drugKey,
+          patientId,
+          prescriberNpi,
+          planType,
+          expedited,
+          applyException,
+          // Same clock start as the benefit step, so the due time does not move.
+          receivedAt: benefit.clock?.receivedAt,
+          caseId: benefit.caseId,
+          answers
+        })
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -89,6 +103,29 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi }) {
               {benefit.formulary.formularyStatus} · {benefit.formulary.coverageFactors.join(', ')}
             </div>
           </div>
+
+          {!result && <ClockBadge clock={benefit.clock} />}
+
+          {benefit.exception && (
+            <div className="text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded px-2 py-1 mb-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={applyException}
+                  onChange={(e) => setApplyException(e.target.checked)}
+                />
+                <span>
+                  Apply the FFE issuer exception from the NCPDP requirement, ending{' '}
+                  {benefit.exception.until}
+                </span>
+              </label>
+              {applyException && (
+                <div className="mt-1">
+                  With the exception, the NCPDP ePA requirement would not apply to this issuer until {benefit.exception.until}. The decision clock still applies. The end date models the position that the exception should be narrow and time-limited. It is not rule text: the proposed rule makes the exception a justification and compliance-plan process.
+                </div>
+              )}
+            </div>
+          )}
 
           {benefit.prefillFrom === 'medical' && (
             <div className="text-xs bg-emerald-100 border border-emerald-300 text-emerald-900 rounded px-2 py-1 mb-2">
@@ -159,6 +196,7 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi }) {
               this denial.
             </div>
           )}
+          <ClockBadge clock={result.clock} decidedAt={result.decidedAt} />
           <SharedRecord record={result.record} />
         </div>
       )}

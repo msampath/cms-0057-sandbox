@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { logTransaction, getDrugPaRecord, upsertDrugPaRecord } from '@/lib/db';
 import { resolvePharmacyRouting } from '@/lib/routing';
 import { DRUG_CATALOG, DRUG_DENIAL_REASONS, decideDrugPa } from '@/lib/drugPa';
+import { decisionClock } from '@/lib/decisionClock';
+import { getPatient } from '@/lib/patients';
 import {
   formularyLookup,
   rtpbRequest,
@@ -27,7 +29,7 @@ import {
  */
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  const { step, drugKey, patientId, prescriberNpi = 'unknown' } = body;
+  const { step, drugKey, patientId, prescriberNpi = 'unknown', expedited = false } = body;
   const drug = DRUG_CATALOG[drugKey];
   if (!drug || !patientId || !['benefit', 'submit'].includes(step)) {
     return NextResponse.json(
@@ -37,6 +39,17 @@ export async function POST(request) {
   }
 
   const { pbm } = resolvePharmacyRouting();
+
+  // Same order as the PAS route: the plan the EHR is ordering under, then
+  // the member's own plan.
+  const member = getPatient(patientId);
+  const planType = body.planType || member?.planType || null;
+  const clock = decisionClock({ planType, isDrug: true, benefit: 'pharmacy', expedited, receivedAt: body.receivedAt });
+  // Illustrative FFE issuer exception from the NCPDP requirement. It does
+  // not change the decision clock.
+  const exception = member?.ncpdpException
+    ? { ...member.ncpdpException, applied: !!body.applyException }
+    : null;
   const meta = { patientId, npi: prescriberNpi };
 
   if (step === 'benefit') {
@@ -65,6 +78,9 @@ export async function POST(request) {
     return NextResponse.json({
       pbm,
       caseId,
+      planType,
+      clock,
+      exception,
       formulary,
       rtpb: { coverageStatus: 'Covered with restrictions', priorAuthorizationRequired: true },
       questions: drug.questions,
@@ -101,12 +117,16 @@ export async function POST(request) {
     'Prime Therapeutics',
     decision.determination === 'approved' ? 'DRUG PA APPROVED' : 'DRUG PA DENIED',
     `${drug.name}, pharmacy benefit, ePA case ${caseId}${reason ? `. Reason: ${reason.text}` : ''}.`,
-    meta
+    { ...meta, clock, decidedAt: new Date().toISOString() }
   );
 
   return NextResponse.json({
     pbm,
     caseId,
+    planType,
+    clock,
+    decidedAt: new Date().toISOString(),
+    exception,
     decision,
     reason: reason ? { key: decision.reasonKey, text: reason.text, x12: reason.x12 } : null,
     record,

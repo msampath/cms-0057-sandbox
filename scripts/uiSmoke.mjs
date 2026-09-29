@@ -38,13 +38,31 @@ const STEPS = [
     expectBeforeSubmit: ['Answers carried over from the pharmacy-benefit'],
     expect: ['Prior Authorization Denied', 'Reason code: 44', 'Shared drug PA record']
   },
-  { path: '/patient', expect: ['156.221(a)'] },
+  {
+    // Scenario cards set the default order (self-administered certolizumab).
+    path: '/ehr',
+    name: 'Medicaid clock',
+    click: ['Maria Santos', 'Sign Order'],
+    formSelect: 'M05.79',
+    submit: 'Submit ePA (PARequest)',
+    // Submitting logs a Medicaid decision with a live clock for the feed step.
+    expect: ['Decision clock', '24 hours', '72-hour emergency supply', '1927(d)(5)(A)', 'PAResponse: Denied']
+  },
+  {
+    path: '/ehr',
+    name: 'FFE QHP clock',
+    click: ['David Kim', 'Sign Order'],
+    expect: ['72 hours', 'proposed, not yet in effect', 'FFE issuer exception', '2028-06-30']
+  },
+  { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans'] },
+  { path: '/patient', name: 'FFE QHP member', click: ['David Kim'], expect: ['Individual market QHP on an FFE (illustrative)'] },
   { path: '/um', tab: 'Rules & Schema', expect: ['Payer Interop Gateway'] },
   {
     path: '/um',
     tab: 'Live Traffic Feed',
+    // Decision clock text comes from the badge on decision entries.
     click: ['Show FHIR ↔ X12 translation', 'Show NCPDP messages'],
-    expect: ['FHIR PAS, proposed HIPAA standard', '162.1302', 'X12 278 — parallel projection', '<Message version="2023011">', 'not certified NCPDP payloads']
+    expect: ['FHIR PAS, proposed HIPAA standard', '162.1302', 'X12 278 — parallel projection', '<Message version="2023011">', 'not certified NCPDP payloads', 'Decision clock:', '24 hours', '1927(d)(5)(A)']
   },
   { path: '/um', tab: 'Provider Access', click: ['Retrieve panel'], expect: ['156.222(a)', 'pat-8849-jane-doe'] },
   { path: '/um', tab: 'P2P Exchange', click: ['Request prior plan data'], expect: ['156.222(b)', 'Step 3', 'DENIED'] },
@@ -92,7 +110,7 @@ page.on('response', (r) => {
 
 console.log(`UI smoke against ${BASE}`);
 for (const step of STEPS) {
-  const label = `${step.path}${step.tab ? ` [${step.tab}]` : ''}${step.selectOrder ? ` (${step.selectOrder})` : ''}`;
+  const label = `${step.path}${step.tab ? ` [${step.tab}]` : ''}${step.selectOrder ? ` (${step.selectOrder})` : ''}${step.name ? ` (${step.name})` : ''}`;
   errors.length = 0;
   try {
     await page.goto(`${BASE}${step.path}`, { waitUntil: 'networkidle' });

@@ -4,6 +4,9 @@ import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
 import { PAS_PROFILES, readReviewAction } from '@/lib/fhir';
 import PharmacyEpa, { SharedRecord } from './pharmacyEpa';
+import ClockBadge from '@/app/components/ClockBadge';
+import { decisionClock } from '@/lib/decisionClock';
+import { DRUG_BY_HCPCS } from '@/lib/drugPa';
 import {
   getLaunchedSession,
   fetchLaunchedPatient,
@@ -205,6 +208,26 @@ const SCENARIO_DECORATIONS = [
     borderColor: 'border-purple-400',
     description: 'COMM-HMO, 11 M. ABA therapy with autism Dx; category-match routing to Lucet.',
   },
+  {
+    id: 'maria-santos',
+    patientId: 'pat-5520-maria-santos',
+    defaultOrderIndex: 13,
+    presetCode: '',
+    tag: 'Medicaid MCO',
+    tagColor: 'bg-emerald-100 text-emerald-800',
+    borderColor: 'border-emerald-400',
+    description: 'Medicaid managed care, 38 F. Self-administered certolizumab: one 24-hour drug clock plus a 72-hour emergency supply.',
+  },
+  {
+    id: 'david-kim',
+    patientId: 'pat-4410-david-kim',
+    defaultOrderIndex: 13,
+    presetCode: '',
+    tag: 'FFE QHP (illustrative)',
+    tagColor: 'bg-orange-100 text-orange-800',
+    borderColor: 'border-orange-400',
+    description: 'Individual-market QHP on an FFE, 47 M. Proposed 72-hour drug clock and the FFE issuer NCPDP exception.',
+  },
 ];
 
 const PATIENT_SCENARIOS = SCENARIO_DECORATIONS.map((d) => ({
@@ -278,12 +301,16 @@ function buildPractitionerResource(scenario) {
   };
 }
 
-function buildClaimResource(scenario, order) {
+function buildClaimResource(scenario, order, expedited = false) {
   return {
     resourceType: 'Claim',
     id: `claim-${Date.now()}`,
     status: 'active',
     use: 'preauthorization',
+    // stat marks an expedited request, which selects the expedited clock.
+    priority: {
+      coding: [{ system: 'http://terminology.hl7.org/CodeSystem/processpriority', code: expedited ? 'stat' : 'normal' }]
+    },
     patient: { reference: `Patient/${scenario.patientId}` },
     item: [
       {
@@ -508,6 +535,8 @@ export default function EhrDashboard() {
   // cheap on keystrokes where nothing is actually dirty.
   const invalidateOrderContext = () => {
     scenarioVersionRef.current += 1;
+    setPasSentAt(null);
+    setPasDecidedAt(null);
     setPharmacyRun(0);
     setDrugPrefillFrom(null);
     setDrugRecord(null);
@@ -555,6 +584,11 @@ export default function EhrDashboard() {
       .catch(() => setLaunchedPatient(null));
   }, []);
   const [simulateDenial, setSimulateDenial] = useState(false);
+  // Expedited (urgent) request: selects the expedited decision clock.
+  const [expedited, setExpedited] = useState(false);
+  // When the current PAS request was sent, for the decision-clock badge.
+  const [pasSentAt, setPasSentAt] = useState(null);
+  const [pasDecidedAt, setPasDecidedAt] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showLogic, setShowLogic] = useState(false);
   const [smartContext, setSmartContext] = useState(null);
@@ -585,6 +619,9 @@ export default function EhrDashboard() {
     setDrugPrefillFrom(null);
     setDrugRecord(null);
     setSimulateDenial(false);
+    setExpedited(false);
+    setPasSentAt(null);
+    setPasDecidedAt(null);
     // Reset debug toggles too -- hardStopFlag is a per-order-attempt
     // sandbox lever, not a persistent user preference. Carrying it
     // forward would silently trip a hard-stop CDS response on a
@@ -652,6 +689,7 @@ export default function EhrDashboard() {
           clearInterval(iv);
           const { claimResponse, task } = extractPasResponse(data.responseBundle);
           setPasResponse(claimResponse);
+          setPasDecidedAt(new Date().toISOString());
           setSystemAction(task);
           setWasPended(true);
           setPendedId(null);
@@ -935,7 +973,9 @@ export default function EhrDashboard() {
     const patient = buildPatientResource(scenario, order.conditions);
     const coverage = buildCoverageResource(scenario);
     const practitioner = buildPractitionerResource(scenario);
-    const claim = buildClaimResource(scenario, order);
+    const claim = buildClaimResource(scenario, order, expedited);
+    setPasSentAt(new Date().toISOString());
+    setPasDecidedAt(null);
     const qr = buildQuestionnaireResponse(questionnaire, answers, patient);
 
     const bundle = {
@@ -994,8 +1034,10 @@ export default function EhrDashboard() {
       if (readReviewAction(claimResponse)?.actionCode === 'A4') {
         setPendedId(claimResponse.preAuthRef);
         setPasResponse(claimResponse);
+        setPasDecidedAt(null);
       } else {
         setPasResponse(claimResponse);
+        setPasDecidedAt(new Date().toISOString());
         setSystemAction(task || systemAction);
       }
       if (order.drug) {
@@ -1374,6 +1416,8 @@ export default function EhrDashboard() {
           <option value="COMM-PPO">Commercial PPO</option>
           <option value="COMM-HMO">Commercial HMO</option>
           <option value="MA-PPO">Medicare Advantage PPO</option>
+          <option value="MEDICAID-MCO">Medicaid managed care</option>
+          <option value="QHP-FFE">QHP on an FFE (illustrative)</option>
         </select>
         <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">
           Preset orders
@@ -1443,6 +1487,17 @@ export default function EhrDashboard() {
             (structured reason codes, CMS-0057-F, 45 CFR 156.223)
           </span>
         </label>
+        <label className="flex items-center gap-2 text-sm text-gray-700 mb-4 -mt-2">
+          <input
+            type="checkbox"
+            checked={expedited}
+            onChange={(e) => { invalidateOrderContext(); setExpedited(e.target.checked); }}
+            className="w-4 h-4"
+          />
+          <span>
+            <strong>Expedited</strong> request (urgent). Selects the expedited decision clock.
+          </span>
+        </label>
 
         <button
           onClick={signOrder}
@@ -1460,6 +1515,8 @@ export default function EhrDashboard() {
           drugKey={order.drug}
           patientId={buildPatientResource(scenario, order.conditions).id}
           prescriberNpi={scenario.npi}
+          planType={planType}
+          expedited={expedited}
         />
       )}
 
@@ -1915,6 +1972,22 @@ export default function EhrDashboard() {
               Received via rest-hook notification — pended request finalized after clinical review.
             </div>
           )}
+        </div>
+      )}
+
+      {pasResponse && pasSentAt && pasResponse.outcome !== 'error' && (
+        <div className="max-w-3xl">
+          <ClockBadge
+            clock={decisionClock({
+              planType,
+              // A custom-typed drug code (for example J0717) is a drug too.
+              isDrug: Boolean(order.drug || DRUG_BY_HCPCS[order.code]),
+              benefit: 'medical',
+              expedited,
+              receivedAt: pasSentAt
+            })}
+            decidedAt={pendedId ? null : pasDecidedAt}
+          />
         </div>
       )}
 

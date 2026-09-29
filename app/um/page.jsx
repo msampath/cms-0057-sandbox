@@ -17,6 +17,7 @@ import SchemaExplorer from './schemaExplorer';
 import ProviderAccessPanel from './providerAccess';
 import P2PExchangePanel from './p2pExchange';
 import StandardsPanel from './standardsPanel';
+import ClockBadge from '@/app/components/ClockBadge';
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -318,6 +319,7 @@ export default function UmDashboard() {
               ) : (
                 <span className="text-gray-300">{log.details}</span>
               )}
+              {log.clock && <ClockBadge clock={log.clock} decidedAt={log.decidedAt} tone="dark" />}
             </div>
           );
         })}

@@ -256,8 +256,73 @@ async function phase2() {
   check('feed has structured NCPDP entries', ncpdp.length > 0 && ncpdp[0].details?.kind === 'ncpdp');
 }
 
+async function phase3() {
+  console.log('\nPhase 3: decision clocks');
+  const hoursBetween = (c) => (Date.parse(c.dueAt) - Date.parse(c.receivedAt)) / 3600000;
+  const bene = async (patientId, extra = {}) =>
+    (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId, ...extra })).json;
+
+  const maria = await bene('pat-5520-maria-santos');
+  check('Medicaid drug: 24h single clock', maria?.clock?.hours === 24 && hoursBetween(maria.clock) === 24);
+  check('Medicaid drug: 72h emergency supply flag', /72-hour emergency supply/.test(maria?.clock?.emergencySupply || ''));
+  check('Medicaid drug: basis cites SSA 1927(d)(5)(A)', /1927\(d\)\(5\)\(A\)/.test(maria?.clock?.basis || ''));
+  const mariaX = await bene('pat-5520-maria-santos', { expedited: true });
+  check('Medicaid drug: expedited is still 24h', mariaX?.clock?.hours === 24);
+
+  const david = await bene('pat-4410-david-kim');
+  check('FFE QHP drug: 72h standard, marked proposed', david?.clock?.hours === 72 && david?.clock?.proposed === true && hoursBetween(david.clock) === 72);
+  const davidX = await bene('pat-4410-david-kim', { expedited: true });
+  check('FFE QHP drug: 24h expedited', davidX?.clock?.hours === 24);
+  check('FFE QHP: issuer NCPDP exception carries an end date', david?.exception?.until === '2028-06-30');
+  const davidSub = (await post('/api/drug-pa/pharmacy', {
+    step: 'submit', drugKey: 'certolizumab', patientId: 'pat-4410-david-kim', applyException: true,
+    receivedAt: david?.clock?.receivedAt, caseId: david?.caseId,
+    answers: { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true }
+  })).json;
+  check('FFE QHP: exception does not change the clock', !!david?.clock?.dueAt && davidSub?.clock?.dueAt === david.clock.dueAt && davidSub?.exception?.applied === true);
+
+  const robert = await bene('pat-7712-robert-chen');
+  check('MA pharmacy drug: Part D basis (423.568)', /423\.568/.test(robert?.clock?.basis || '') && robert?.clock?.hours === 72);
+
+  const jane = await bene('pat-8849-jane-doe');
+  check('Commercial: no federal clock', jane?.clock?.applies === false && /not an impacted payer/.test(jane?.clock?.note || ''));
+
+  // PAS: MA non-drug pend (15820) → 7 days standard, 72h expedited.
+  await post('/api/pas/submit', pasBundle('15820', {}, 'MA-PPO'));
+  const pend = (await logsFor(/^PA PENDED$/))[0];
+  check('MA item pend: 7 calendar days standard', pend?.clock?.hours === 168 && /422\.568/.test(pend?.clock?.basis || ''));
+  const statBundle = pasBundle('15820', {}, 'MA-PPO');
+  statBundle.entry[1].resource.priority = { coding: [{ code: 'stat' }] };
+  const statCr = (await post('/api/pas/submit', statBundle)).json?.entry?.[0]?.resource;
+  const pendX = (await logsFor(/^PA PENDED$/))[0];
+  check('MA item pend, expedited: 72h', pendX?.clock?.hours === 72 && pendX?.clock?.kind === 'expedited');
+  check('pend disposition states the clock, not a fixed 7 days', /Decision due within 72 hours/.test(statCr?.disposition || ''), statCr?.disposition);
+
+  // PAS: QHP medical-benefit drug approval → proposed 72h clock on the decision log.
+  const qhp = drugPasBundle('pat-4410-david-kim', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true });
+  qhp.planType = 'QHP-FFE';
+  const qhpCr = (await post('/api/pas/submit', qhp)).json?.entry?.[0]?.resource;
+  const qhpLog = (await logsFor(/^FHIR RESPONSE$/))[0];
+  check('QHP medical drug: J0717 matches commercial grid → A1', review(qhpCr)?.action === 'A1');
+  check('QHP medical drug: decision log carries proposed 72h clock + decidedAt', qhpLog?.clock?.hours === 72 && qhpLog?.clock?.proposed && !!qhpLog?.decidedAt);
+
+  // A conformant Bundle with no sandbox planType falls back to the member's plan.
+  const bare = drugPasBundle('pat-4410-david-kim', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true });
+  delete bare.planType;
+  await post('/api/pas/submit', bare);
+  const bareLog = (await logsFor(/^FHIR RESPONSE$/))[0];
+  check('PAS without planType uses the member plan (QHP clock)', bareLog?.clock?.hours === 72 && bareLog?.clock?.proposed === true);
+
+  // Medicaid has no ingested grid, so J0717 is not on it.
+  const medHook = await post('/api/cds-services/order-sign', {
+    hook: 'order-sign', hookInstance: 'reg-3', code: 'J0717', planType: 'MEDICAID-MCO',
+    practitionerNpi: '1234567890', patientId: 'pat-5520-maria-santos', patient: { id: 'pat-5520-maria-santos' }
+  });
+  check('Medicaid: no grid rule matches (no Medicaid grid ingested)', /not on the active PA grid/i.test(medHook.json?.cards?.[0]?.summary || ''), medHook.json?.cards?.[0]?.summary);
+}
+
 // Phase checks are appended below as each phase lands.
-const PHASES = [baseline, phase1, phase2];
+const PHASES = [baseline, phase1, phase2, phase3];
 
 console.log(`Regression against ${BASE}`);
 for (const phase of PHASES) await phase();

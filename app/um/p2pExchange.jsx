@@ -132,7 +132,8 @@ export default function P2PExchangePanel() {
               onChange={(e) => { setPatientId(e.target.value); reset(); }}
               className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
             >
-              {PATIENT_LIST.map((p) => (
+              {/* Only members who came from a prior plan have history to exchange. */}
+              {PATIENT_LIST.filter((p) => PRIOR_PLAN_HISTORY[p.id]).map((p) => (
                 <option key={p.id} value={p.id}>{p.name} ({p.subscriberId})</option>
               ))}
             </select>

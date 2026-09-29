@@ -48,7 +48,10 @@ function ruleMatchesPlan(rule, planType) {
   if (!label) return true; // no provenance → universal
   const isMa = label.includes('medicare');
   if (planType === 'MA-PPO') return isMa || (!label.includes('commercial') && !label.includes('medsurg') && !label.includes('med-surg') && !label.includes('med surg'));
-  if (planType === 'COMM-PPO' || planType === 'COMM-HMO') return !isMa;
+  // QHP individual-market coverage uses the commercial grids.
+  if (planType === 'COMM-PPO' || planType === 'COMM-HMO' || planType === 'QHP-FFE') return !isMa;
+  // No Medicaid PA grid is ingested, so no grid rule applies to Medicaid.
+  if (planType === 'MEDICAID-MCO') return false;
   return true;
 }
 

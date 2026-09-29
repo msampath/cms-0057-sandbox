@@ -17,6 +17,8 @@ import {
   wrapPasResponseBundle
 } from '@/lib/fhir';
 import { reviewWindow } from '@/lib/pendedReview';
+import { getPatient } from '@/lib/patients';
+import { decisionClock, formatClockHours } from '@/lib/decisionClock';
 import {
   generateX12_278,
   generateX12_278_Response,
@@ -50,7 +52,10 @@ function ruleMatchesPlan(rule, planType) {
   if (!label) return true;
   const isMa = label.includes('medicare');
   if (planType === 'MA-PPO') return isMa || (!label.includes('commercial') && !label.includes('medsurg') && !label.includes('med-surg') && !label.includes('med surg'));
-  if (planType === 'COMM-PPO' || planType === 'COMM-HMO') return !isMa;
+  // QHP individual-market coverage uses the commercial grids.
+  if (planType === 'COMM-PPO' || planType === 'COMM-HMO' || planType === 'QHP-FFE') return !isMa;
+  // No Medicaid PA grid is ingested, so no grid rule applies to Medicaid.
+  if (planType === 'MEDICAID-MCO') return false;
   return true;
 }
 
@@ -87,7 +92,11 @@ export async function POST(request) {
     null;
   const serviceCategory =
     claim?.item?.[0]?.productOrService?.text || bundle.serviceCategory || null;
-  const planType = bundle.planType || null;
+  // The EHR sends the plan it is ordering under (its plan selector lets a
+  // demo run one patient under another plan's rules). A Bundle without one
+  // falls back to the member's own plan, so a conformant PAS client that
+  // omits the sandbox field still gets the right rules and decision clock.
+  const planType = bundle.planType || getPatient(patient?.id)?.planType || null;
 
   logTransaction(
     'PAS Gateway',
@@ -154,6 +163,11 @@ export async function POST(request) {
   // the same function the pharmacy (NCPDP) track calls, from the DTR
   // QuestionnaireResponse answers. The result lands in the shared record.
   const drugKey = DRUG_BY_HCPCS[orderedCode] || null;
+
+  // Legal decision clock (lib/decisionClock.js). Expedited when the Claim
+  // priority is stat. Logged with each decision so the UM feed can show it.
+  const expedited = claim?.priority?.coding?.[0]?.code === 'stat';
+  const clock = decisionClock({ planType, isDrug: !!drugKey, benefit: 'medical', expedited, receivedAt: new Date().toISOString() });
   const drugQr = drugKey ? pickEntry(bundle, 'QuestionnaireResponse') : null;
   const drugAnswers = drugKey ? answersFromQuestionnaireResponse(drugQr) : null;
   const drugDecision = drugKey ? decideDrugPa(drugKey, drugAnswers) : null;
@@ -253,7 +267,7 @@ export async function POST(request) {
     );
     logTransaction('PAS Translator', 'FHIR RESPONSE (DENIAL)',
       `ClaimResponse: outcome=complete, reviewAction A3 Not Certified, reason ${reason.code} ${reason.display} (X12 886). Appeal period: 60 days.`,
-      { patientId: patient?.id || 'unknown' }
+      { patientId: patient?.id || 'unknown', clock, decidedAt: new Date().toISOString() }
     );
 
     // Response is a PAS response Bundle: the ClaimResponse plus the
@@ -279,7 +293,11 @@ export async function POST(request) {
       // PAS binds outcome to complete | error | partial. A pend is a
       // completed adjudication whose review action is A4.
       outcome: 'complete',
-      disposition: 'Prior authorization request is pending clinical review for functional impairment determination. Standard decision timeline: 7 calendar days.',
+      disposition: `Prior authorization request is pending clinical review for functional impairment determination. ${
+        clock.applies
+          ? `Decision due within ${formatClockHours(clock.hours)} (${clock.kind}, ${clock.basis}).`
+          : 'No federal decision clock applies to this coverage.'
+      }`,
       preAuthRef: authNumber,
       insurer: { display: vendor },
       item: claimResponseItems(claim, {
@@ -310,12 +328,13 @@ export async function POST(request) {
       orderedCode,
       // Kept so the final ClaimResponse echoes the same item sequences.
       claimItems: (claim?.item || []).map((it) => ({ sequence: it.sequence })),
+      clock,
       decideAfter: Date.now() + reviewWindow(),
     });
 
     logTransaction('PAS Gateway', 'PA PENDED',
       `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
-      { patientId: patient?.id || 'unknown' }
+      { patientId: patient?.id || 'unknown', clock }
     );
 
     return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse]));
@@ -389,7 +408,7 @@ export async function POST(request) {
     'PAS Translator',
     'FHIR RESPONSE',
     `ClaimResponse synthesised from preserved Bundle + auth # ${authNumber} (no FHIR→X12→FHIR round-trip).`,
-    { patientId: patient?.id || 'unknown' }
+    { patientId: patient?.id || 'unknown', clock, decidedAt: new Date().toISOString() }
   );
 
   return NextResponse.json(
