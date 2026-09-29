@@ -139,3 +139,42 @@ export function TranslatorToggle({ payload }) {
     </div>
   );
 }
+
+/**
+ * NCPDP message viewer for the pharmacy-benefit drug track. Same toggle
+ * pattern as the FHIR ↔ X12 drawer. The messages are illustrative, not
+ * certified NCPDP payloads (lib/ncpdpGenerator.js).
+ */
+export function NcpdpToggle({ payload }) {
+  const [open, setOpen] = useState(false);
+  if (!payload || payload.kind !== 'ncpdp') return null;
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded border border-slate-700"
+      >
+        {open ? '▼ Hide NCPDP messages' : '▶ Show NCPDP messages'}{' '}
+        <span className="text-slate-500">({payload.messages?.length || 0}, routed to {payload.pbm})</span>
+      </button>
+      {open && (
+        <div className="bg-slate-950 border border-slate-700 rounded p-3 mt-2 text-[12px] leading-snug">
+          <div className="bg-teal-950/40 border-l-4 border-teal-500 px-3 py-2 mb-3 text-teal-200 text-[11px]">
+            Pharmacy-benefit drug track. Transaction names follow NCPDP SCRIPT 2023011 and RTPB v13. These are illustrative, not certified NCPDP payloads. The decision and reason come from the same model the PAS track uses.
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {(payload.messages || []).map((m) => (
+              <div key={m.name}>
+                <div className="text-[10px] uppercase tracking-widest text-teal-300 mb-1">{m.name}</div>
+                <pre className="bg-black border border-slate-800 rounded p-2 overflow-auto max-h-[320px] text-teal-100 text-[10px] leading-tight">
+                  <code>{m.xml}</code>
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

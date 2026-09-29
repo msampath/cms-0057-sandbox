@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getDb, logTransaction, addPendingRequest } from '@/lib/db';
+import { getDb, logTransaction, addPendingRequest, upsertDrugPaRecord } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
+import {
+  DRUG_BY_HCPCS,
+  DRUG_DENIAL_REASONS,
+  answersFromQuestionnaireResponse,
+  decideDrugPa
+} from '@/lib/drugPa';
 import {
   PAS_PROFILES,
   REVIEW_ACTIONS,
@@ -144,11 +150,46 @@ export async function POST(request) {
     note: 'Bundle preserved unaltered; X12 is a parallel projection for the legacy adjudication engine.'
   });
 
-  // Denial simulation — triggered by _simulateDenial flag from EHR debug toggle.
-  if (bundle._simulateDenial) {
+  // Drug orders are decided by the shared drug PA model (lib/drugPa.js),
+  // the same function the pharmacy (NCPDP) track calls, from the DTR
+  // QuestionnaireResponse answers. The result lands in the shared record.
+  const drugKey = DRUG_BY_HCPCS[orderedCode] || null;
+  const drugQr = drugKey ? pickEntry(bundle, 'QuestionnaireResponse') : null;
+  const drugAnswers = drugKey ? answersFromQuestionnaireResponse(drugQr) : null;
+  const drugDecision = drugKey ? decideDrugPa(drugKey, drugAnswers) : null;
+  const drugReason = drugDecision?.reasonKey ? DRUG_DENIAL_REASONS[drugDecision.reasonKey] : null;
+  // Only a submission that carries DTR answers is a decision by the shared
+  // model. A forced debug denial (_simulateDenial), or a Bundle with no
+  // QuestionnaireResponse answers, is recorded on the medical track so the EHR card
+  // and the record agree, but it does not change the shared determination
+  // or answers.
+  const recordDrugDecision = (authNumber, { forced = false } = {}) => {
+    if (!drugKey) return;
+    const hasAnswers = !!drugAnswers && Object.keys(drugAnswers).length > 0;
+    const modelDecision = !forced && hasAnswers;
+    upsertDrugPaRecord(patient?.id || 'unknown', drugKey, {
+      ...(modelDecision ? { answers: drugAnswers, decision: drugDecision } : {}),
+      track: 'medical',
+      trackData: {
+        hcpcs: orderedCode,
+        vendor,
+        authNumber,
+        determination: forced ? 'denied' : drugDecision.determination,
+        ...(forced ? { debugForced: true } : {}),
+        ...(!forced && !hasAnswers ? { noAnswers: true } : {})
+      }
+    });
+  };
+
+  // Denials: the _simulateDenial debug flag from the EHR, or a drug
+  // decision that did not meet criteria.
+  if (bundle._simulateDenial || drugDecision?.determination === 'denied') {
     const authNumber = `DENY${Date.now().toString().slice(-7)}`;
     const receiverId = getReceiverId(vendor);
-    const reason = REVIEW_REASONS.notMedicallyNecessary;
+    const reason = drugReason ? drugReason.x12 : REVIEW_REASONS.notMedicallyNecessary;
+    // A genuine model denial is recorded as such. A debug denial of a
+    // request the model would approve is recorded as forced.
+    recordDrugDecision(authNumber, { forced: drugDecision?.determination !== 'denied' });
 
     const x12Denial = generateX12_278_Response({
       receiverId,
@@ -172,14 +213,18 @@ export async function POST(request) {
       patient: { reference: `Patient/${patient?.id || 'unknown'}` },
       created: new Date().toISOString(),
       outcome: 'complete',
-      disposition: `Prior Authorization Denied by ${vendor}. Service does not meet clinical criteria for medical necessity.`,
+      disposition: drugReason
+        ? `Prior Authorization Denied by ${vendor}. ${drugReason.text}.`
+        : `Prior Authorization Denied by ${vendor}. Service does not meet clinical criteria for medical necessity.`,
       preAuthRef: authNumber,
       insurer: { display: vendor },
       item: claimResponseItems(claim, {
         action: REVIEW_ACTIONS.notCertified,
         number: authNumber,
         reason,
-        reasonText: `The requested service (${orderedCode || 'service'}) does not meet ${vendor} clinical criteria for medical necessity. Functional impairment or clinical indication documentation submitted is insufficient under policy MED-0472. Appeal rights apply within 60 days of this determination.`
+        reasonText: drugReason
+          ? `${drugReason.text}. Appeal rights apply within 60 days of this determination.`
+          : `The requested service (${orderedCode || 'service'}) does not meet ${vendor} clinical criteria for medical necessity. Functional impairment or clinical indication documentation submitted is insufficient under policy MED-0472. Appeal rights apply within 60 days of this determination.`
       })
     };
 
@@ -282,6 +327,7 @@ export async function POST(request) {
   await new Promise((r) => setTimeout(r, 2500));
 
   const authNumber = `AUTH${Date.now().toString().slice(-7)}`;
+  recordDrugDecision(authNumber);
   const receiverId = getReceiverId(vendor);
   const x12Response = generateX12_278_Response({ receiverId, authNumber });
 

@@ -10,19 +10,41 @@ import { chromium } from 'playwright';
 
 const BASE = (process.env.BASE_URL || 'http://localhost:3000/cms-0057').replace(/\/$/, '');
 
-// Each step: a page, an optional /um tab, optional buttons to click (by
-// visible text, in order), and text that must appear afterwards. The clicks
+// Each step: a page, an optional /um tab, an optional preset order to pick
+// in /ehr (matched by option text), optional buttons to click (by visible
+// text, in order), and text that must appear afterwards. The clicks
 // exercise client fetches, so a fetch that skipped apiUrl() 404s here.
 const STEPS = [
   { path: '/', expect: ['156.223', '156.222(a)', '156.222(b)', '156.221(a)'] },
   { path: '/ehr', click: ['Sign Order'], expect: ['Prior authorization required', 'Launch DTR'] },
+  {
+    path: '/ehr',
+    selectOrder: 'self-administered syringe',
+    click: ['Sign Order'],
+    formSelect: 'M05.79',
+    submit: 'Submit ePA (PARequest)',
+    expect: ['Pharmacy benefit', 'RTPB v13', 'F&B v60', 'PAResponse: Denied', 'Step therapy not met', 'Shared drug PA record']
+  },
+  {
+    path: '/ehr',
+    selectOrder: 'clinic-administered',
+    click: ['Sign Order', 'Launch DTR SMART App'],
+    // No formSelect: the diagnosis must arrive from the shared record.
+    expectSelectValue: 'M05.79',
+    submit: 'Submit PAS Request',
+    // The pharmacy step above left answers on the shared record for this
+    // patient, so the DTR form must say it carried them over. The DTR panel
+    // closes on submit, so that is checked before submitting.
+    expectBeforeSubmit: ['Answers carried over from the pharmacy-benefit'],
+    expect: ['Prior Authorization Denied', 'Reason code: 44', 'Shared drug PA record']
+  },
   { path: '/patient', expect: ['156.221(a)'] },
   { path: '/um', tab: 'Rules & Schema', expect: ['Payer Interop Gateway'] },
   {
     path: '/um',
     tab: 'Live Traffic Feed',
-    click: ['Show FHIR ↔ X12 translation'],
-    expect: ['FHIR PAS, proposed HIPAA standard', '162.1302', 'X12 278 — parallel projection']
+    click: ['Show FHIR ↔ X12 translation', 'Show NCPDP messages'],
+    expect: ['FHIR PAS, proposed HIPAA standard', '162.1302', 'X12 278 — parallel projection', '<Message version="2023011">', 'not certified NCPDP payloads']
   },
   { path: '/um', tab: 'Provider Access', click: ['Retrieve panel'], expect: ['156.222(a)', 'pat-8849-jane-doe'] },
   { path: '/um', tab: 'P2P Exchange', click: ['Request prior plan data'], expect: ['156.222(b)', 'Step 3', 'DENIED'] },
@@ -70,7 +92,7 @@ page.on('response', (r) => {
 
 console.log(`UI smoke against ${BASE}`);
 for (const step of STEPS) {
-  const label = step.tab ? `${step.path} [${step.tab}]` : step.path;
+  const label = `${step.path}${step.tab ? ` [${step.tab}]` : ''}${step.selectOrder ? ` (${step.selectOrder})` : ''}`;
   errors.length = 0;
   try {
     await page.goto(`${BASE}${step.path}`, { waitUntil: 'networkidle' });
@@ -78,9 +100,33 @@ for (const step of STEPS) {
       await page.getByRole('button', { name: new RegExp(`^${step.tab.replace(/[&]/g, '\\$&')}`) }).first().click();
       await page.waitForTimeout(600);
     }
+    if (step.selectOrder) {
+      const select = page.locator('select').nth(1);
+      const value = await select.locator('option', { hasText: step.selectOrder }).first().getAttribute('value');
+      await select.selectOption(value);
+    }
     for (const buttonName of step.click || []) {
       await page.getByRole('button', { name: buttonName }).first().click();
       await settle();
+    }
+    // Fill the form's diagnosis select (booleans stay unchecked, which the
+    // shared model decides as step therapy not met), then submit.
+    if (step.formSelect) {
+      await page.locator('form select').first().selectOption(step.formSelect);
+    }
+    if (step.expectSelectValue) {
+      const v = await page.locator('form select').first().inputValue();
+      if (v !== step.expectSelectValue) errors.push(`form select is "${v}", expected carried-over "${step.expectSelectValue}"`);
+    }
+    if (step.expectBeforeSubmit) {
+      const before = (await page.locator('body').innerText()).toLowerCase();
+      for (const t of step.expectBeforeSubmit) {
+        if (!before.includes(t.toLowerCase())) errors.push(`missing before submit: ${t}`);
+      }
+    }
+    if (step.submit) {
+      await page.getByRole('button', { name: step.submit }).first().click();
+      await settle(800, 15000);
     }
     // Let in-flight requests settle so a slow 404 is charged to this step
     // instead of being cleared when the next step starts.

@@ -228,6 +228,28 @@ async function phase2() {
   const rec2 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
   check('shared record approved on both tracks', rec2?.tracks?.medical?.determination === 'approved' && rec2?.tracks?.pharmacy?.determination === 'approved');
 
+  // A debug denial of a request the model approves is recorded as forced
+  // and leaves the shared determination and answers alone.
+  const forcedBundle = { ...drugPasBundle(pid2, ok), _simulateDenial: true };
+  const forced = (await post('/api/pas/submit', forcedBundle)).json?.entry?.[0]?.resource;
+  const rec3 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
+  check('debug denial returns A3 but is marked forced on the record', review(forced)?.action === 'A3' && rec3?.tracks?.medical?.debugForced === true && rec3?.determination === 'approved');
+  // A PAS Bundle with no QuestionnaireResponse must not wipe the answers.
+  const noQr = drugPasBundle(pid2, {});
+  noQr.entry = noQr.entry.filter((e) => e.resource.resourceType !== 'QuestionnaireResponse');
+  await post('/api/pas/submit', noQr);
+  const rec4 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
+  check('empty answer set does not wipe stored answers', JSON.stringify(rec4?.answers) === JSON.stringify(ok), JSON.stringify(rec4?.answers));
+  check('empty answer set does not flip the shared determination', rec4?.determination === 'approved' && rec4?.tracks?.medical?.noAnswers === true, rec4?.determination);
+
+  // Second denial branch: TB screening missing → 886 code 0U on both tracks.
+  const pid3 = `pat-reg-${Date.now()}-c`;
+  const tb = { diagnosis: 'M05.79', 'conventional-therapy-failed': true, 'tb-screen-negative': false };
+  const medTb = (await post('/api/pas/submit', drugPasBundle(pid3, tb))).json?.entry?.[0]?.resource;
+  check('medical track: TB screen missing → A3 + 886 code 0U', review(medTb)?.action === 'A3' && review(medTb)?.reason === '0U', JSON.stringify(review(medTb)));
+  const phTb = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: pid3, answers: tb })).json;
+  check('pharmacy track: same tb-screen reason and 0U in PAResponse', phTb?.reason?.key === 'tb-screen' && phTb?.messages?.find((m) => m.name === 'PAResponse')?.xml.includes('<X12ReviewDecisionReason>0U<'));
+
   const bad = await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'nope', patientId: pid });
   check('pharmacy route rejects unknown drug with 400', bad.status === 400);
   const ncpdp = await logsFor(/^NCPDP PA RESPONSE/);

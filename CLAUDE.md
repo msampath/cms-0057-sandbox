@@ -117,6 +117,16 @@ PAS endpoint receives a FHIR Bundle (Patient + Coverage + Practitioner + Claim +
 
 **Determination encoding**: every ClaimResponse uses `outcome: 'complete'` (PAS binds outcome to `complete | error | partial`, so `queued` is invalid even for pends). The decision is the PAS `extension-reviewAction` on `item[].adjudication` (or `addItem[].adjudication` in P2P history), built by `claimResponseItems()` / `reviewAdjudication()` in `lib/fhir.js`: X12 306 action `A1` certified, `A3` not certified, `A4` pended, plus an X12 886 reason code on denials. Clients read it with `readReviewAction()`, never from `outcome` or `error[]`. The X12 278 response carries the same decision in `HCR` via `generateX12_278_Response({ action, reasonCode })`, with no `AAA` segment on decisions. The one `outcome: 'error'` path is a real validation failure (Bundle with no Claim or Patient): `pasErrorClaimResponse()` returns an X12 901 reject reason plus `extension-errorFollowupAction`, and the 278 carries `AAA*N**15*C` instead of `HCR`.
 
+### Drug PA: one drug, two benefits (CMS-0062-P, `lib/drugPa.js`)
+
+Certolizumab pegol (Cimzia) is the demo drug because its real grid row (J0717, 2026 commercial specialty pharmacy list, page 6) reads "not for use when drug is self administered". Adalimumab is not on the grid, and synthetic rules are not allowed.
+- Clinic-administered → medical benefit → CRD (J0717 binds the generated `drug-certolizumab` questionnaire) → DTR → PAS
+- Self-administered → pharmacy benefit → `POST /api/drug-pa/pharmacy` (step `benefit`: RTPB, F&B lookup, PAInitiation; step `submit`: PARequest → PAResponse) → Prime Therapeutics
+- Both tracks call the same `decideDrugPa()` and share `DRUG_DENIAL_REASONS` (X12 886 code per reason). The DTR Questionnaire and the NCPDP question set are generated from the same `questions` array
+- One in-memory record per patient + drug in `lib/db.js` (`upsertDrugPaRecord`), cleared by demo reset, read at `GET /api/drug-pa/record`. Each track prefills from it, so a drug moving between benefits is not re-asked
+- `lib/ncpdpGenerator.js` builds illustrative XML. NCPDP code lists are licensed and not reproduced, and every message says it is not a certified payload
+- Structured NCPDP payloads are logged without patient meta (like the X12 278 request) and render in the `/um` feed through `NcpdpToggle`
+
 ### Rule Ingestion Pipeline (`app/api/extract/`, `app/api/commit-rules/`, `scripts/extractPreIngested.py`)
 
 1. Upload PA grid PDF via `/um` UI

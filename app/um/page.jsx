@@ -11,7 +11,7 @@ import {
   groupBySource,
   formatBytes
 } from './stagingData';
-import { TranslatorToggle } from './translatorDrawer';
+import { TranslatorToggle, NcpdpToggle } from './translatorDrawer';
 import RulesExplorer from './rulesExplorer';
 import SchemaExplorer from './schemaExplorer';
 import ProviderAccessPanel from './providerAccess';
@@ -313,6 +313,7 @@ export default function UmDashboard() {
                     {log.details.note || 'Structured payload — see expander below.'}
                   </span>
                   <TranslatorToggle payload={log.details} />
+                  <NcpdpToggle payload={log.details} />
                 </>
               ) : (
                 <span className="text-gray-300">{log.details}</span>
@@ -744,6 +745,7 @@ function KpiPanel({ title, children }) {
 
 function actionColor(action) {
   if (/X12 278/i.test(action)) return 'text-cyan-300';
+  if (/NCPDP|DRUG PA/i.test(action)) return 'text-teal-300';
   if (/COVERAGE-INFORMATION/i.test(action)) return 'text-fuchsia-400';
   if (/EVALUATION|HOOK/i.test(action)) return 'text-yellow-400';
   if (/COMMIT/i.test(action)) return 'text-green-400';

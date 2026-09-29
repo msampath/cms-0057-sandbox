@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
 import { PAS_PROFILES, readReviewAction } from '@/lib/fhir';
+import PharmacyEpa, { SharedRecord } from './pharmacyEpa';
 import {
   getLaunchedSession,
   fetchLaunchedPatient,
@@ -133,6 +134,27 @@ const ORDER_OPTIONS = [
     code: 'NOCODE',
     category: 'Partial Hospitalization Treatment Program',
     conditions: []
+  },
+  // ---- Drug PA: one drug, two benefits (CMS-0062-P) --------------------
+  // Same drug, different site of care. J0717 is the real BCBSIL commercial
+  // specialty pharmacy grid row, which reads "not for use when drug is self
+  // administered". The self-administered syringe goes to the pharmacy
+  // benefit over NCPDP instead of CRD. Both share lib/drugPa.js.
+  {
+    label: 'J0717 — Certolizumab (Cimzia), clinic-administered → medical benefit (PAS)',
+    code: 'J0717',
+    category: null,
+    conditions: [],
+    drug: 'certolizumab',
+    siteOfCare: 'clinic'
+  },
+  {
+    label: 'Certolizumab (Cimzia), self-administered syringe → pharmacy benefit (NCPDP)',
+    code: 'J0717',
+    category: null,
+    conditions: [],
+    drug: 'certolizumab',
+    siteOfCare: 'self'
   }
 ];
 
@@ -376,6 +398,13 @@ export default function EhrDashboard() {
   const [cqlLibrary, setCqlLibrary] = useState(null);
   const [answers, setAnswers] = useState({});
   const [pasResponse, setPasResponse] = useState(null);
+  // Bumped on each Sign Order for a pharmacy-benefit drug order; keys a
+  // fresh PharmacyEpa panel. 0 hides it.
+  const [pharmacyRun, setPharmacyRun] = useState(0);
+  // Which track, if any, the DTR answers were carried over from.
+  const [drugPrefillFrom, setDrugPrefillFrom] = useState(null);
+  // Shared drug PA record, read back after a medical-track PAS decision.
+  const [drugRecord, setDrugRecord] = useState(null);
   const pasReview = readReviewAction(pasResponse);
   const [pendedId, setPendedId] = useState(null);
   const [wasPended, setWasPended] = useState(false);
@@ -479,6 +508,9 @@ export default function EhrDashboard() {
   // cheap on keystrokes where nothing is actually dirty.
   const invalidateOrderContext = () => {
     scenarioVersionRef.current += 1;
+    setPharmacyRun(0);
+    setDrugPrefillFrom(null);
+    setDrugRecord(null);
     setShowDtr(false);
     setQuestionnaire(null);
     setCqlLibrary(null);
@@ -549,6 +581,9 @@ export default function EhrDashboard() {
     setPasResponse(null);
     setPendedId(null);
     setWasPended(false);
+    setPharmacyRun(0);
+    setDrugPrefillFrom(null);
+    setDrugRecord(null);
     setSimulateDenial(false);
     // Reset debug toggles too -- hardStopFlag is a per-order-attempt
     // sandbox lever, not a persistent user preference. Carrying it
@@ -667,6 +702,18 @@ export default function EhrDashboard() {
     // "Prefilled from live CQL" badge for a define that never ran.
     // Also invalidates any in-flight prepop request synchronously.
     invalidatePrepop();
+    setDrugPrefillFrom(null);
+    setDrugRecord(null);
+
+    // Pharmacy-benefit drug orders skip CRD. They go to the PBM over
+    // NCPDP (RTPB → F&B → ePA), rendered by the PharmacyEpa panel.
+    if (order.siteOfCare === 'self') {
+      scenarioVersionRef.current += 1;
+      setPharmacyRun((n) => n + 1);
+      return;
+    }
+    setPharmacyRun(0);
+
     setLoading(true);
     // Stamp the scenario version at kickoff -- every fetch below
     // gates its state write on this so a scenario switch mid-flight
@@ -820,6 +867,22 @@ export default function EhrDashboard() {
       setAnswers(seeded);
     }
 
+    // Drug orders: carry over answers already given on the pharmacy
+    // track from the shared drug PA record, so nothing is re-asked.
+    if (order.drug) {
+      try {
+        const pid = buildPatientResource(scenario, order.conditions).id;
+        const rRes = await fetch(apiUrl(`/api/drug-pa/record?patientId=${encodeURIComponent(pid)}&drugKey=${order.drug}`));
+        const { record } = await rRes.json();
+        if (stillCurrent() && record?.answers) {
+          setAnswers((a) => ({ ...a, ...record.answers }));
+          setDrugPrefillFrom(record.tracks?.pharmacy ? 'pharmacy' : null);
+        }
+      } catch {
+        // Prefill is a convenience; the form still works empty.
+      }
+    }
+
     // Fetch the CQL library (if bound). Tolerant on failure -- library
     // is only a reference display, not required for DTR to function.
     if (ctx.cqlLibraryId) {
@@ -892,6 +955,9 @@ export default function EhrDashboard() {
     };
 
     setWasPended(false);
+    // Clear the previous shared drug record so it cannot sit under a new
+    // response while the read-back is in flight.
+    setDrugRecord(null);
     // Also clear pendedId at the top so re-submitting the same order
     // starts from a clean pended state. Otherwise a prior 'queued'
     // outcome's preAuthRef persists, and if the new submission
@@ -931,6 +997,12 @@ export default function EhrDashboard() {
       } else {
         setPasResponse(claimResponse);
         setSystemAction(task || systemAction);
+      }
+      if (order.drug) {
+        fetch(apiUrl(`/api/drug-pa/record?patientId=${encodeURIComponent(patient.id)}&drugKey=${order.drug}`))
+          .then((r) => r.json())
+          .then(({ record }) => { if (stillCurrent()) setDrugRecord(record); })
+          .catch(() => {});
       }
     }
     if (optumResp.status === 'fulfilled') {
@@ -1381,6 +1453,16 @@ export default function EhrDashboard() {
         </button>
       </div>
 
+      {/* ---- Pharmacy-benefit drug track (NCPDP) ------------------------- */}
+      {pharmacyRun > 0 && order.siteOfCare === 'self' && (
+        <PharmacyEpa
+          key={pharmacyRun}
+          drugKey={order.drug}
+          patientId={buildPatientResource(scenario, order.conditions).id}
+          prescriberNpi={scenario.npi}
+        />
+      )}
+
       {/* ---- CDS Hooks 2.0 card ---------------------------------------- */}
       {card && (
         <div
@@ -1671,6 +1753,11 @@ export default function EhrDashboard() {
               </div>
             )}
 
+            {drugPrefillFrom === 'pharmacy' && (
+              <div className="text-xs bg-emerald-100 border border-emerald-300 text-emerald-900 rounded px-2 py-1 mb-3">
+                Answers carried over from the pharmacy-benefit (NCPDP) request on the shared drug PA record. Nothing re-entered.
+              </div>
+            )}
             <form onSubmit={submitPas} className="space-y-5">
               {(questionnaire.item || []).map((item) => (
                 <QuestionnaireItem
@@ -1828,6 +1915,12 @@ export default function EhrDashboard() {
               Received via rest-hook notification — pended request finalized after clinical review.
             </div>
           )}
+        </div>
+      )}
+
+      {pasResponse && !pendedId && drugRecord && (
+        <div className="max-w-3xl mt-2">
+          <SharedRecord record={drugRecord} />
         </div>
       )}
 

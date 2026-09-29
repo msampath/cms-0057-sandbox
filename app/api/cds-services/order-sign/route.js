@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
+import { DRUG_BY_HCPCS, questionnaireIdForDrug } from '@/lib/drugPa';
 
 /**
  * CDS Hooks 2.0 `order-sign` service.
@@ -276,7 +277,12 @@ export async function POST(request) {
       source: sourceForRule(rule)
     };
   } else {
-    const questId = rule.questionnaire_id || 'fallback-medical-necessity';
+    // Drug codes bind the questionnaire generated from the shared drug PA
+    // model, in place of the grid's generic fallback.
+    const questId =
+      questionnaireIdForDrug(DRUG_BY_HCPCS[orderedCode]) ||
+      rule.questionnaire_id ||
+      'fallback-medical-necessity';
     const dtrUrl = `/dtr/launch?questionnaire=${encodeURIComponent(questId)}&code=${encodeURIComponent(orderedCode)}`;
     card = {
       summary: 'Prior authorization required',

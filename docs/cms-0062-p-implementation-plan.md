@@ -262,7 +262,8 @@ This phase implements position 1. It replaces the earlier idea of pinning every 
 This phase implements position 2. I would build this before the phases that depend on it.
 
 - Order picker in `app/ehr/page.jsx`:
-  - One drug, adalimumab, with a site-of-care choice
+  - One drug, certolizumab pegol (Cimzia), with a site-of-care choice
+  - Adalimumab was the first choice, but it is not on the ingested BCBSIL grid, and this repo does not add synthetic rules. Certolizumab (J0717) is on the real 2026 commercial specialty pharmacy grid (page 6), and the grid text reads "not for use when drug is self administered", which is the site-of-care split this phase shows
   - Clinic-administered → medical benefit → CRD → DTR → PAS
   - Self-administered → pharmacy benefit → RTPB → F&B → NCPDP ePA
 - Shared decision model in a new `lib/drugPa.js`:
@@ -279,7 +280,7 @@ This phase implements position 2. I would build this before the phases that depe
 - The Live Traffic Feed and translator drawer show the NCPDP messages next to the FHIR ones
   - `app/um/translatorDrawer.jsx` is built for X12 segments only. It needs an NCPDP payload kind
   - `app/um/page.jsx` needs to route the new log entries to it
-- Verify → run the same adalimumab request both ways → confirm one decision record with the same reason code in both formats
+- Verify → run the same certolizumab request both ways → confirm one decision record with the same reason code in both formats
 
 ### Phase 3: Decision clocks
 
@@ -317,7 +318,7 @@ This phase covers the drug-exclusion removal and the pharmacy part of position 2
 - Relabel the outbound integration panels in `/ehr` and `/um` by mode:
   - `live` → "Optum sandbox response" and "Availity sandbox response"
   - `mock-*` → "Optum sandbox response (saved copy)" and "Availity sandbox response (saved copy)", since no call is made in mock mode
-- Verify → a denied adalimumab PA from Phase 2 appears in all three access APIs and the pharmacy view with the same reason code
+- Verify → a denied certolizumab PA from Phase 2 appears in all three access APIs and the pharmacy view with the same reason code
 
 ### Phase 5: Reporting and metrics
 
