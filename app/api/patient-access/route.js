@@ -3,6 +3,7 @@ import { getLog } from '@/lib/db';
 import { getPatient, PAYER_NAME, BENEFIT_YEAR } from '@/lib/patients';
 import { buildEob, CARIN_PROFILES, US_CORE_PROFILES } from '@/lib/eob';
 import { requireScopes, AUTH_ENABLED } from '@/lib/auth';
+import { versionedCanonical } from '@/lib/fhir';
 import { drugPriorAuthEobs } from '@/lib/drugPaAccess';
 import { withUsage } from '@/lib/withUsage';
 
@@ -45,7 +46,12 @@ async function handleGET(request) {
       details: typeof e.details === 'string' ? e.details : JSON.stringify(e.details),
     }));
 
-  // Resources are shaped to US Core (Patient) and CARIN BB (Coverage, EOB).
+  // Resources are shaped to US Core 6.1.0 (Patient) and CARIN BB (Coverage,
+  // EOB). The Patient carries the 6.1.0 mandatory elements (identifier with
+  // system and value, a name with family or given, gender) and the Must
+  // Support ones the demo has data for: birthDate, synthetic address and
+  // telecom, communication language, and race and ethnicity recorded as
+  // asked but not answered (NullFlavor ASKU) rather than invented.
   // The envelope around them ({ smartScopes, patient, coverage, eobs,
   // priorAuthorizations, events }) is a demo convenience: the events feed comes from the
   // transaction log and has no natural FHIR resource in this simulator.
@@ -68,7 +74,23 @@ async function handleGET(request) {
     patient: {
       resourceType: 'Patient',
       id: patientId,
-      meta: { profile: [US_CORE_PROFILES.patient] },
+      meta: { profile: [versionedCanonical(US_CORE_PROFILES.patient, 'us-core')] },
+      extension: [
+        {
+          url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-race',
+          extension: [
+            { url: 'ombCategory', valueCoding: { system: 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor', code: 'ASKU', display: 'Asked but no answer' } },
+            { url: 'text', valueString: 'Asked but no answer' }
+          ]
+        },
+        {
+          url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity',
+          extension: [
+            { url: 'ombCategory', valueCoding: { system: 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor', code: 'ASKU', display: 'Asked but no answer' } },
+            { url: 'text', valueString: 'Asked but no answer' }
+          ]
+        }
+      ],
       identifier: [
         {
           type: {
@@ -84,9 +106,14 @@ async function handleGET(request) {
           value: meta.subscriberId
         }
       ],
-      name: [{ text: meta.name, family: meta.family, given: meta.given }],
+      name: [{ use: 'official', text: meta.name, family: meta.family, given: meta.given }],
+      ...(meta.phone ? { telecom: [{ system: 'phone', value: meta.phone, use: 'home' }] } : {}),
       gender: meta.gender,
       birthDate: meta.dob,
+      ...(meta.address ? { address: [{ use: 'home', ...meta.address }] } : {}),
+      communication: [
+        { language: { coding: [{ system: 'urn:ietf:bcp:47', code: 'en-US', display: 'English (United States)' }] } }
+      ],
     },
     coverage: {
       resourceType: 'Coverage',

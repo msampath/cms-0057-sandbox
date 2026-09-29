@@ -91,7 +91,7 @@ const STEPS = [
   },
   { path: '/patient', name: 'drug PAs', click: ['Jane Doe'], expect: ['Drug prior authorizations', 'Profile: PDex Prior Authorization', 'X12 886 44'] },
   { path: '/pharmacy', click: ['Look up PA status'], expect: ['PA status for Certolizumab', 'X12 886 44', 'RTPB', 'F&B formulary'] },
-  { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans'] },
+  { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans', 'US Core 6.1.0'] },
   { path: '/patient', name: 'FFE QHP member', click: ['David Kim'], expect: ['Individual market QHP on an FFE (illustrative)'] },
   { path: '/um', tab: 'Rules & Schema', expect: ['Payer Interop Gateway'] },
   {
@@ -109,7 +109,7 @@ const STEPS = [
     expectAbsent: ['Optum real', 'reached a real implementation']
   },
   { path: '/um', tab: 'P2P Exchange', click: ['Request prior plan data'], expect: ['156.222(b)', 'Step 3', 'DENIED', 'Prior plan drug prior authorizations', '50474075010'] },
-  { path: '/um', tab: 'Standards', expect: ['Sunset marker', '2.2.1', 'January 1, 2028'] },
+  { path: '/um', tab: 'Standards', expect: ['Sunset marker', '2.2.1', 'January 1, 2028', '3.1.1 expired January 1, 2026'], expectAbsent: ['3.1.1expired version'] },
   {
     path: '/um',
     tab: 'Registry & Metrics',

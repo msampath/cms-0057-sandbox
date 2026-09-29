@@ -174,8 +174,8 @@ async function phase1() {
   check('ClaimResponse profile pinned to PAS 2.2.1', res('ClaimResponse')?.endsWith('profile-claimresponse|2.2.1'), res('ClaimResponse'));
   check('Coverage profile pinned to CARIN BB 2.2.0', res('Coverage')?.endsWith('C4BB-Coverage|2.2.0'), res('Coverage'));
   check('EOB profile pinned to CARIN BB 2.2.0', res('ExplanationOfBenefit')?.endsWith('|2.2.0'), res('ExplanationOfBenefit'));
-  check('Patient profile is US Core, unversioned (3.1.1 expired)', res('Patient') === 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient', res('Patient'));
-  check('US Core IG listed unversioned (3.1.1 expired)', igs.includes('http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core'));
+  check('Patient profile pinned to US Core 6.1.0 (Phase 7)', res('Patient') === 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient|6.1.0', res('Patient'));
+  check('US Core IG pinned to 6.1.0, 3.1.1 not advertised', igs.includes('http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core|6.1.0') && !igs.some((u) => u.endsWith('|3.1.1')));
   check('PDex IG pinned to 2.0.0', igs.some((u) => u.endsWith('hl7.fhir.us.davinci-pdex|2.0.0')));
 }
 
@@ -572,8 +572,30 @@ async function phase6() {
   check('rejections are logged to the feed', rejLog.length >= 2);
 }
 
+async function phase7() {
+  console.log('\nPhase 7: US Core 6.1.0 Patient');
+  const pTok = await token(['patient/Patient.read', 'patient/Coverage.read', 'patient/ExplanationOfBenefit.read', 'patient/ClaimResponse.read']);
+  const ALL = ['pat-8849-jane-doe', 'pat-7712-robert-chen', 'pat-3301-dorothy-hayes', 'pat-6614-marcus-johnson', 'pat-5520-maria-santos', 'pat-4410-david-kim'];
+  for (const pid of ALL) {
+    const p = (await call('/api/patient-access?patientId=' + pid, { headers: { authorization: 'Bearer ' + pTok } })).json?.patient;
+    check(pid + ': profile us-core-patient|6.1.0', p?.meta?.profile?.[0] === 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient|6.1.0');
+    check(pid + ': identifier has system and value (1..*)', p?.identifier?.length > 0 && p.identifier.every((i) => i.system && i.value));
+    check(pid + ': name meets us-core-6 (family or given)', p?.name?.length > 0 && p.name.every((n) => n.family || n.given?.length));
+    check(pid + ': gender present (1..1)', ['male', 'female', 'other', 'unknown'].includes(p?.gender));
+    check(pid + ': Must Support birthDate, address, telecom, communication.language',
+      !!p?.birthDate && !!p?.address?.[0]?.postalCode && p?.telecom?.[0]?.system === 'phone' && !!p?.communication?.[0]?.language?.coding?.[0]?.code);
+    // Sub-extensions matched by url, not position.
+    const sub = (u, s) => (p?.extension || []).find((e) => e.url === u)?.extension?.find((x) => x.url === s);
+    const RACE = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-race';
+    const ETH = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity';
+    check(pid + ': race and ethnicity recorded as ASKU with the required text',
+      sub(RACE, 'ombCategory')?.valueCoding?.code === 'ASKU' && !!sub(RACE, 'text')?.valueString &&
+      sub(ETH, 'ombCategory')?.valueCoding?.code === 'ASKU' && !!sub(ETH, 'text')?.valueString);
+  }
+}
+
 // Phase checks are appended below as each phase lands.
-const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5, phase6];
+const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5, phase6, phase7];
 
 console.log(`Regression against ${BASE}`);
 for (const phase of PHASES) await phase();

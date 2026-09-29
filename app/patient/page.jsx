@@ -41,7 +41,7 @@ export default function PatientAccess() {
         <div>
           <h1 className="text-2xl font-bold text-green-400">Patient Access Portal</h1>
           <p className="text-xs text-gray-400 mt-1">
-            45 CFR 156.221(a) — Da Vinci PDex IG · US Core STU 3.1.1 · SMART on FHIR v2 (patient launch)
+            45 CFR 156.221(a) — Da Vinci PDex IG · US Core 6.1.0 · SMART on FHIR v2 (patient launch)
           </p>
         </div>
         <div className="flex gap-2 items-center">
