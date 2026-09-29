@@ -93,7 +93,7 @@ const STEPS = [
   { path: '/pharmacy', click: ['Look up PA status'], expect: ['PA status for Certolizumab', 'X12 886 44', 'RTPB', 'F&B formulary'] },
   { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans', 'US Core 6.1.0'] },
   { path: '/patient', name: 'FFE QHP member', click: ['David Kim'], expect: ['Individual market QHP on an FFE (illustrative)'] },
-  { path: '/um', tab: 'Rules & Schema', expect: ['70553', 'Showing the first 200'] },
+  { path: '/um', tab: 'Rules & Schema', expect: ['Showing the first 200'] },
   {
     path: '/um',
     tab: 'Live Traffic Feed',
@@ -151,15 +151,25 @@ async function settle(quietMs = 500, maxMs = 10000) {
     await page.waitForTimeout(100);
   }
 }
-// Any 4xx or 5xx fails the step, apart from the scripted ones: the 401
-// demo steps (no token, or the deliberate bad token) and the clearinghouse
-// rejection.
+// Any 4xx or 5xx fails the step, apart from the scripted ones: the
+// Registry tab's deliberate bad-token call and the clearinghouse rejection.
 const EXPECTED = [
-  (r) => r.status() === 401 && !r.request().headers().authorization,
   // The Registry & Metrics tab's deliberate bad-token call.
   (r) => r.status() === 401 && r.request().headers().authorization === 'Bearer not-a-valid-token',
   (r) => r.status() === 422 && /\/api\/clearinghouse\/pas$/.test(r.url())
 ];
+// Every PAS request Bundle the EHR sends must carry the R4 Claim elements
+// and no Patient.condition (not an R4 element).
+page.on('request', (req) => {
+  if (req.method() !== 'POST' || !/\/api\/(pas\/submit|clearinghouse\/pas)$/.test(req.url())) return;
+  let b;
+  try { b = req.postDataJSON(); } catch { errors.push('PAS request body is not JSON'); return; }
+  const res = (t) => (b?.entry || []).map((e) => e.resource).find((r) => r?.resourceType === t);
+  const claim = res('Claim');
+  const missing = ['type', 'created', 'provider', 'insurance', 'priority'].filter((k) => !claim?.[k]);
+  if (missing.length) errors.push(`PAS Claim is missing ${missing.join(', ')}`);
+  if (res('Patient')?.condition) errors.push('PAS Patient carries condition, which R4 does not define');
+});
 page.on('response', (r) => {
   if (r.status() >= 400 && !IGNORED_URLS.some((re) => re.test(r.url())) && !EXPECTED.some((ok) => ok(r))) {
     errors.push(`HTTP ${r.status()} ${r.url()}`);

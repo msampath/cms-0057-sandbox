@@ -5,6 +5,7 @@ import {
   DRUG_BY_HCPCS,
   DRUG_DENIAL_REASONS,
   answersFromQuestionnaireResponse,
+  sanitizeDrugAnswers,
   decideDrugPa
 } from '@/lib/drugPa';
 import {
@@ -108,6 +109,12 @@ export async function handlePOST(request) {
     str(firstItem?.productOrService?.text) || str(bundle.serviceCategory) || null;
   const claimType = claimTypeOf(claim);
   const coverageId = str(coverage?.id) || getPatient(patient?.id)?.coverageId || null;
+  // Every decision log carries the requesting NPI, so Provider Access shows
+  // item PAs as well as CRD events.
+  const logMeta = {
+    patientId: patient?.id || 'unknown',
+    npi: practitionerNpiOf(bundle) || getPatient(patient?.id)?.npi || null
+  };
   // The EHR sends the plan it is ordering under (its plan selector lets a
   // demo run one patient under another plan's rules). A Bundle without one
   // falls back to the member's own plan, so a conformant PAS client that
@@ -126,7 +133,7 @@ export async function handlePOST(request) {
     'PAS Gateway',
     'BUNDLE RECEIVED',
     `FHIR Bundle (type=${bundle.type || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
-    { patientId: patient?.id || 'unknown' }
+    logMeta
   );
 
   // Validation error: without a Claim and a Patient there is nothing to
@@ -143,7 +150,7 @@ export async function handlePOST(request) {
         action: 'AAA',
         reasonCode: rejectReason.code
       })}`,
-      { patientId: patient?.id || 'unknown' }
+      logMeta
     );
 
     return NextResponse.json(
@@ -175,10 +182,13 @@ export async function handlePOST(request) {
 
   // Structured log: the UM Dashboard renders this with the inline FHIR↔X12
   // translation drawer. The bundle is included verbatim (unaltered).
+  // The Bundle is kept in the log for the translator drawer, unless it is
+  // large: the log holds 500 entries, and a body can be up to 1 MB.
+  const bundleBytes = JSON.stringify(bundle).length;
   logTransaction('PAS Gateway', 'X12 278 REQUEST', {
     kind: 'fhir-x12-translation',
     vendor,
-    bundle,
+    bundle: bundleBytes <= 64 * 1024 ? bundle : { note: `Bundle not kept in the log (${bundleBytes} bytes)` },
     x12,
     mappings,
     note: 'Bundle preserved unaltered; X12 is a parallel projection for the legacy adjudication engine.'
@@ -195,7 +205,7 @@ export async function handlePOST(request) {
   const receivedAt = new Date().toISOString();
   const clock = decisionClock({ planType, isDrug: !!drugKey, benefit: 'medical', expedited, receivedAt });
   const drugQr = drugKey ? pickEntry(bundle, 'QuestionnaireResponse') : null;
-  const drugAnswers = drugKey ? answersFromQuestionnaireResponse(drugQr) : null;
+  const drugAnswers = drugKey ? sanitizeDrugAnswers(drugKey, answersFromQuestionnaireResponse(drugQr)) : null;
   const drugDecision = drugKey ? decideDrugPa(drugKey, drugAnswers) : null;
   const drugReason = drugDecision?.reasonKey ? DRUG_DENIAL_REASONS[drugDecision.reasonKey] : null;
   // Only a submission that carries DTR answers is a decision by the shared
@@ -244,7 +254,7 @@ export async function handlePOST(request) {
 
     logTransaction('Legacy UM Mainframe', 'X12 278 RESPONSE (DENIAL)',
       `Decision: DENIED. HCR*A3, reason ${reason.code} ${reason.display}.\n\n${x12Denial}`,
-      { patientId: patient?.id || 'unknown' }
+      logMeta
     );
 
     const deniedClaimResponse = {
@@ -287,12 +297,12 @@ export async function handlePOST(request) {
 
     logTransaction('PAS Gateway', 'COVERAGE-INFORMATION ACTION (DENIAL)',
       JSON.stringify(deniedAction.resource, null, 2),
-      { patientId: patient?.id || 'unknown' }
+      logMeta
     );
     logTransaction('PAS Translator', 'FHIR RESPONSE (DENIAL)',
       `ClaimResponse: outcome=complete, reviewAction A3 Not Certified, reason ${reason.code} ${reason.display} (X12 886). Appeal period: 60 days.`,
       {
-        patientId: patient?.id || 'unknown',
+        ...logMeta,
         clock,
         decidedAt: new Date().toISOString(),
         // PA metrics tag. A debug denial of a request the model would
@@ -353,7 +363,7 @@ export async function handlePOST(request) {
         authNumber,
         action: REVIEW_ACTIONS.pended.code
       })}`,
-      { patientId: patient?.id || 'unknown' }
+      logMeta
     );
 
     // Request-driven review clock: the decision becomes due after the
@@ -366,6 +376,7 @@ export async function handlePOST(request) {
       authNumber,
       vendor,
       patientId: patient?.id || 'unknown',
+      npi: logMeta.npi,
       orderedCode,
       // Kept so the final ClaimResponse echoes the same item sequences.
       claimItems: (Array.isArray(claim?.item) ? claim.item : []).map((it) => ({ sequence: it?.sequence })),
@@ -398,13 +409,13 @@ export async function handlePOST(request) {
     });
     logTransaction('CDex Gateway', 'CDEX ATTACHMENT REQUESTED',
       `Auth # ${authNumber}: attachment-request Task asks for LOINC ${ATTACHMENT_NEEDED.code} (${ATTACHMENT_NEEDED.display}) via $submit-attachment.\n\n${JSON.stringify(cdexTask, null, 2)}`,
-      { patientId: patient?.id || 'unknown' }
+      logMeta
     );
 
     logTransaction('PAS Gateway', 'PA PENDED',
       `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
       {
-        patientId: patient?.id || 'unknown',
+        ...logMeta,
         clock,
         pa: { requestId: authNumber, category: drugKey ? 'drug' : 'item', benefit: 'medical', determination: 'pended', planType, receivedAt }
       }
@@ -427,7 +438,7 @@ export async function handlePOST(request) {
     'Legacy UM Mainframe',
     'X12 278 RESPONSE',
     `Decision: APPROVED. Auth # ${authNumber}.\n\n${x12Response}`,
-    { patientId: patient?.id || 'unknown' }
+    logMeta
   );
 
   // FHIR ClaimResponse is constructed directly from the preserved Bundle
@@ -469,14 +480,14 @@ export async function handlePOST(request) {
     'PAS Gateway',
     'COVERAGE-INFORMATION ACTION',
     JSON.stringify(satisfiedAction.resource, null, 2),
-    { patientId: patient?.id || 'unknown' }
+    logMeta
   );
   logTransaction(
     'PAS Translator',
     'FHIR RESPONSE',
     `ClaimResponse synthesised from preserved Bundle + auth # ${authNumber} (no FHIR→X12→FHIR round-trip).`,
     {
-      patientId: patient?.id || 'unknown',
+      ...logMeta,
       clock,
       decidedAt: new Date().toISOString(),
       pa: {

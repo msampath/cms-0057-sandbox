@@ -24,7 +24,7 @@ const fetcher = (url) => fetch(url).then((r) => {
  *   - Effective date
  */
 export default function RulesExplorer() {
-  const { data, isLoading } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 15000 });
+  const { data, error, isLoading } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 15000 });
   const rules = data?.rules || [];
 
   const [query, setQuery] = useState('');
@@ -106,6 +106,7 @@ export default function RulesExplorer() {
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
         <div className="lg:col-span-3 bg-gray-900 border border-gray-700 rounded overflow-auto" style={{ maxHeight: 340 }}>
+          {error && <div className="text-xs text-red-300 mb-2">Rules unavailable ({error.message}). Retrying.</div>}
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-gray-800 text-gray-400">
               <tr>

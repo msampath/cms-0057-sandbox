@@ -45,24 +45,26 @@ export async function POST(request) {
   if (Number(request.headers.get('content-length') || 0) > MAX_UPLOAD_BYTES) {
     return NextResponse.json({ error: `file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, { status: 413 });
   }
-  if (extracting) {
-    return NextResponse.json({ error: 'another extraction is running, try again shortly' }, { status: 429 });
-  }
-  extracting = true;
-  try {
-    return await extract(request);
-  } finally {
-    extracting = false;
-  }
-}
-
-async function extract(request) {
+  // The upload is read before the lock is taken, so a slow upload cannot
+  // hold the lock.
   let form;
   try {
     form = await request.formData();
   } catch (e) {
     return NextResponse.json({ error: 'expected multipart/form-data with a "file" field' }, { status: 400 });
   }
+  if (extracting) {
+    return NextResponse.json({ error: 'another extraction is running, try again shortly' }, { status: 429 });
+  }
+  extracting = true;
+  try {
+    return await extract(form);
+  } finally {
+    extracting = false;
+  }
+}
+
+async function extract(form) {
   const file = form.get('file');
   if (!file || typeof file === 'string') {
     return NextResponse.json({ error: 'no file uploaded under field "file"' }, { status: 400 });

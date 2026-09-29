@@ -44,6 +44,11 @@ async function token(scopes) {
   return (await res.json()).access_token;
 }
 
+const CI = 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information';
+const ciParts = (res) => (res?.extension || []).find((e) => e.url === CI)?.extension || [];
+const ciPart = (res, name) => ciParts(res).find((e) => e.url === name);
+const orderIn = (bundle) => bundle?.entry?.map((e) => e.resource).find((r) => r?.resourceType === 'ServiceRequest');
+
 function review(cr) {
   const adj = [...(cr?.item || []), ...(cr?.addItem || [])].flatMap((i) => i.adjudication || []);
   for (const a of adj) {
@@ -94,12 +99,21 @@ async function baseline() {
     practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }
   });
   check('card returned for 70553', hook.status === 200 && hook.json?.cards?.length > 0);
+  const hookOrder = hook.json?.systemActions?.[0]?.resource;
+  check('70553 order: ServiceRequest, covered, pa-needed auth-needed, no satisfied-pa-id',
+    hookOrder?.resourceType === 'ServiceRequest' && ciPart(hookOrder, 'covered')?.valueCode === 'covered' &&
+    ciPart(hookOrder, 'pa-needed')?.valueCode === 'auth-needed' && !ciPart(hookOrder, 'satisfied-pa-id'),
+    JSON.stringify(ciParts(hookOrder)));
 
   console.log('\nPAS determinations (Phase 0)');
   const ok = (await post('/api/pas/submit', pasBundle('70553'))).json?.entry?.[0]?.resource;
   check('approval: outcome complete + A1', ok?.outcome === 'complete' && review(ok)?.action === 'A1', JSON.stringify(review(ok)));
   check('approval: created present', !!ok?.created);
-  const deny = (await post('/api/pas/submit', pasBundle('70553', { _simulateDenial: true }))).json?.entry?.[0]?.resource;
+  const denyBundle = (await post('/api/pas/submit', pasBundle('70553', { _simulateDenial: true }))).json;
+  const deny = denyBundle?.entry?.[0]?.resource;
+  const denyOrder = orderIn(denyBundle);
+  check('denial Bundle: the order stays auth-needed, no satisfied-pa-id',
+    ciPart(denyOrder, 'pa-needed')?.valueCode === 'auth-needed' && !ciPart(denyOrder, 'satisfied-pa-id'));
   check('denial: outcome complete + A3 + 0F', deny?.outcome === 'complete' && review(deny)?.action === 'A3' && review(deny)?.reason === '0F', JSON.stringify(review(deny)));
   check('denial: no error[]', !deny?.error);
   const pend = (await post('/api/pas/submit', pasBundle('15820', {}, 'MA-PPO'))).json?.entry?.[0]?.resource;
@@ -132,6 +146,10 @@ async function baseline() {
   const fin = await call(`/api/pas/pended/${pend?.preAuthRef}`);
   const finCr = fin.json?.responseBundle?.entry?.[0]?.resource;
   check('pended request finalizes to A1 after its attachment', fin.status === 200 && review(finCr)?.action === 'A1', fin.json?.status);
+  const finOrder = orderIn(fin.json?.responseBundle);
+  check('finalized pend: order satisfied with the auth number, ClaimResponse type professional',
+    ciPart(finOrder, 'pa-needed')?.valueCode === 'satisfied' && ciPart(finOrder, 'satisfied-pa-id')?.valueString === pend?.preAuthRef &&
+    finCr?.type?.coding?.[0]?.code === 'professional');
 
   console.log('\nSMART auth and access APIs');
   const noTok = await call('/api/patient-access?patientId=pat-8849-jane-doe');
@@ -373,7 +391,7 @@ async function phase4() {
   check('pharmacy EOB: NDC 50474075010, same reason 44',
     rxEob?.item?.[0]?.productOrService?.coding?.[0]?.code === '50474075010' && pdexReview(rxEob)?.reason === '44');
   check('drug PA EOB carries required elements (insurance, provider, created, quantity)',
-    eobs.every((e) => e.insurance?.[0]?.coverage?.reference && (e.provider?.reference || e.provider?.display) && e.created && e.item?.[0]?.quantity?.value));
+    eobs.every((e) => e.insurance?.[0]?.coverage?.reference && (e.provider?.reference || e.provider?.display || e.provider?.identifier?.value) && e.created && e.item?.[0]?.quantity?.value));
 
   const sTok = await token(['system/Patient.read', 'system/ExplanationOfBenefit.read', 'system/ClaimResponse.read', 'system/Coverage.read']);
   const prov = (await call('/api/provider-access?npi=1234567890', { headers: { authorization: 'Bearer ' + sTok } })).json;
@@ -663,14 +681,11 @@ async function hardening() {
 
   console.log('\nSuper-review hardening: CRD and X12');
   const goldNoNpi = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-g1', code: '27447', planType: 'COMM-PPO', patientId: 'pat-3301-dorothy-hayes', patient: { id: 'pat-3301-dorothy-hayes' } })).json;
-  check('gold card needs an enrolled NPI (none sent → no exemption)', !/gold-card/.test(goldNoNpi?.cards?.[0]?.summary || ''), goldNoNpi?.cards?.[0]?.summary);
+  check('gold card needs an enrolled NPI (none sent → PA required card)', goldNoNpi?.cards?.[0]?.summary === 'Prior authorization required', goldNoNpi?.cards?.[0]?.summary);
   const gold = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-g2', code: '27447', planType: 'COMM-PPO', practitionerNpi: 'GOLD-NPI-0001', patientId: 'pat-3301-dorothy-hayes', patient: { id: 'pat-3301-dorothy-hayes' } })).json;
-  const CI = 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information';
-  const ciParts = (res) => (res?.extension || []).find((e) => e.url === CI)?.extension || [];
-  const ciPart = (res, name) => ciParts(res).find((e) => e.url === name);
   const goldOrder = gold?.systemActions?.[0]?.resource;
   check('gold card: card and order coverage-information agree (satisfied, with a satisfied-pa-id)',
-    /gold-card/.test(gold?.cards?.[0]?.summary || '') && ciPart(goldOrder, 'pa-needed')?.valueCode === 'satisfied' && !!ciPart(goldOrder, 'satisfied-pa-id')?.valueString,
+    /gold-card/.test(gold?.cards?.[0]?.summary || '') && ciPart(goldOrder, 'pa-needed')?.valueCode === 'satisfied' && /^GOLDCARD-/.test(ciPart(goldOrder, 'satisfied-pa-id')?.valueString || ''),
     JSON.stringify(ciParts(goldOrder)));
   check('CRD coverage-information is one complex extension on the order (relative sub-extensions, valueDate)',
     goldOrder?.resourceType === 'ServiceRequest' && ciParts(goldOrder).every((e) => !e.url.includes('#') && !e.url.startsWith('http')) &&
@@ -680,7 +695,7 @@ async function hardening() {
   check('J0717 is coded as HCPCS, not CPT', drugOrder?.code?.coding?.[0]?.system === 'https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets' &&
     ciPart(drugOrder, 'billingCode')?.valueCoding?.system === 'https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets');
   const approvedBundle = (await post('/api/pas/submit', pasBundle('70553'))).json;
-  const approvedOrder = approvedBundle?.entry?.map((e) => e.resource).find((r) => r.resourceType === 'ServiceRequest');
+  const approvedOrder = orderIn(approvedBundle);
   check('PAS approval returns the order with pa-needed satisfied and the auth number as satisfied-pa-id',
     ciPart(approvedOrder, 'pa-needed')?.valueCode === 'satisfied' && ciPart(approvedOrder, 'satisfied-pa-id')?.valueString === approvedBundle?.entry?.[0]?.resource?.preAuthRef);
   check('ClaimResponse.type defaults to professional', approvedBundle?.entry?.[0]?.resource?.type?.coding?.[0]?.code === 'professional');
@@ -689,12 +704,52 @@ async function hardening() {
   await post('/api/pas/submit', inj);
   const x12 = String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '');
   check('X12 delimiters in Bundle values are neutralized', x12.includes('DOE NM1 XX') && !x12.includes('~NM1*XX'));
-  check('X12 278: UM01 HS, procedure in SV1 (HC), no ICD-9 BK qualifier', /\nUM\*HS\*I\*/.test(x12) && x12.includes('SV1*HC:70553') && !x12.includes('HI*BK:'));
+  check('X12 278: UM01 HS, service loop 2000F with UM, DTP*472, SV1*HC', /\nUM\*HS\*I\*62~/.test(x12) && /HL\*5\*4\*SS\*0~\nUM\*HS\*I\*62~\nDTP\*472\*D8\*\d{8}~\nSV1\*HC:70553/.test(x12), x12);
+  const segs = x12.split('~').map((x) => x.trim()).filter(Boolean);
+  const st = segs.findIndex((x) => x.startsWith('ST*'));
+  const se = segs.findIndex((x) => x.startsWith('SE*'));
+  check('X12 278: SE01 equals the ST-through-SE segment count', Number(segs[se]?.split('*')[1]) === se - st + 1);
   const dxBundle = pasBundle('70553');
   dxBundle.entry[1].resource.diagnosis = [{ sequence: 1, diagnosisCodeableConcept: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'G43.909' }] } }];
   await post('/api/pas/submit', dxBundle);
   const dxX12 = String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '');
-  check('X12 278: Claim.diagnosis → HI*ABK (ICD-10, no decimal)', dxX12.includes('HI*ABK:G43909'));
+  check('X12 278: Claim.diagnosis → HI*ABK (ICD-10, no decimal), no ICD-9 BK', dxX12.includes('HI*ABK:G43909') && !dxX12.includes('HI*BK:'));
+
+  console.log('\nSuper-review round 3: cascade, attribution, integrations');
+  const hmo = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h1', code: '99999', planType: 'COMM-HMO', practitionerNpi: '1234567890', patientId: 'pat-6614-marcus-johnson', patient: { id: 'pat-6614-marcus-johnson' } })).json;
+  const hmoOrder = hmo?.systemActions?.[0]?.resource;
+  check('COMM-HMO requires PA by default for a code with no rule (cascade step 5)',
+    /plan default/.test(hmo?.cards?.[0]?.summary || '') && ciPart(hmoOrder, 'pa-needed')?.valueCode === 'auth-needed', hmo?.cards?.[0]?.summary);
+  const ppo = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h2', code: '99999', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' } })).json;
+  check('COMM-PPO: a code with no rule is covered, no-auth', ciPart(ppo?.systemActions?.[0]?.resource, 'pa-needed')?.valueCode === 'no-auth' && ciPart(ppo?.systemActions?.[0]?.resource, 'covered')?.valueCode === 'covered');
+  const hsRes = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h3', code: '70553', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, 'hard-stop-trigger': true })).json;
+  const hsOrder = hsRes?.systemActions?.[0]?.resource;
+  check('hard stop: order not-covered, no pa-needed', hsRes?.cards?.[0]?.indicator === 'hard-stop' && ciPart(hsOrder, 'covered')?.valueCode === 'not-covered' && !ciPart(hsOrder, 'pa-needed'));
+  const draft = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h4', code: '70553', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, context: { draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'draft-sr-1' } }] } } })).json;
+  check('the update targets the draft order id', draft?.systemActions?.[0]?.resource?.id === 'draft-sr-1' && draft.systemActions[0].resource.status === 'draft');
+  const provJane = (await call('/api/provider-access?npi=1234567890', auth(sTok))).json?.patients?.find((p) => p.patientId === 'pat-8849-jane-doe');
+  check('Provider Access shows item PA decisions for the requesting NPI', (provJane?.events || []).some((e) => e.action === 'FHIR RESPONSE'));
+  check('member-match for a member with no prior-plan history → 422', (await post('/api/payer-to-payer/member-match', {
+    resourceType: 'Parameters',
+    parameter: [{ name: 'MemberPatient', resource: { resourceType: 'Patient', id: 'pat-5520-maria-santos' } }, { name: 'CoverageToMatch', resource: { resourceType: 'Coverage', subscriberId: 'BCBSIL-MEM-552' } }]
+  }, { authorization: 'Bearer ' + p2pTok })).status === 422);
+  const rxOpen = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe' })).json;
+  const rxLate = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', caseId: rxOpen?.caseId, receivedAt: '2000-01-01T00:00:00Z', answers: { diagnosis: 'M05.79' } })).json;
+  check('pharmacy submit keeps the server clock start, not the client value', rxLate?.caseId === rxOpen?.caseId && rxLate?.clock?.receivedAt === rxOpen?.clock?.receivedAt);
+  const rxForged = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', caseId: 'EPA-NOT-OPENED', answers: { diagnosis: 'M05.79' } })).json;
+  check('pharmacy submit with a case this server did not open gets a new case id', !!rxForged?.caseId && rxForged.caseId !== 'EPA-NOT-OPENED');
+
+  console.log('\nIntegrations (mock mode)');
+  const pmm = await post('/api/optum/provider-member-match', { source: 'sandbox', npi: '1234567890' });
+  check('Optum $bulk-member-match (mock) → 200', pmm.status === 200 && /^mock/.test(pmm.json?.mode || ''), pmm.json?.mode);
+  const kick = await post('/api/optum/export/kickoff', { groupId: 'provider-matched-group-001' });
+  check('Optum $davinci-data-export kickoff (mock) returns a job id', kick.status === 200 && !!kick.json?.jobId);
+  const stat = await call('/api/optum/export/status/' + encodeURIComponent(kick.json?.jobId || 'x'));
+  check('Optum export status (mock) returns a manifest', stat.status === 200 && Array.isArray(stat.json?.response?.output));
+  check('Optum export status rejects a dot-dot job id → 400', (await call('/api/optum/export/status/..')).status !== 200);
+  check('Optum order-sign with a JSON null body → 400', (await post('/api/optum/cds-order-sign', null)).status === 400);
+  check('Availity coverage check (mock) → 200', (await post('/api/availity/coverage-check', { patientId: 'pat-8849-jane-doe' })).status === 200);
+  check('DTR prepopulate with an unknown library → 404 before any Epic call', (await post('/api/dtr/prepopulate', { epicPatientId: 'erXuFYUfucBZaryVksYEcMg3', libraryId: 'Nope' })).status === 404);
   const numeric = pasBundle('70553');
   numeric.entry[0].resource.name = [{ family: 42 }];
   check('numeric family name → no 500', (await post('/api/pas/submit', numeric)).status === 200);

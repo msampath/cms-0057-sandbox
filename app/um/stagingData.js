@@ -113,11 +113,14 @@ export function buildStagedRules(files) {
   return { rules: dedupedRules, perFile };
 }
 
+// Exceptions come from this run only: code rules whose code has no CPT or
+// HCPCS shape, and files that matched no known grid pattern.
 export function buildExceptions(rules, files) {
-  const out = [
-    { code: 'E0601', issue: 'Missing conditional parameter. Forced to fallback Questionnaire.' },
-    { code: 'INVALID_X', issue: 'Failed FHIR ValueSet validation; will be quarantined on commit.' }
-  ];
+  const out = [];
+  const badCodes = rules.filter((r) => r.match_type === 'code' && !/^(\d{5}|\d{4}[A-Z]|[A-Z]\d{4})$/.test(String(r.service_code || '')));
+  if (badCodes.length > 0) {
+    out.push({ code: 'CODE_SHAPE', issue: `${badCodes.length} code rule${badCodes.length === 1 ? '' : 's'} with a code that is not CPT or HCPCS shaped (for example ${badCodes[0].service_code}).` });
+  }
   const unmatched = files.filter((f) => !pickPatternForFile(f.name));
   if (unmatched.length > 0) {
     out.push({ code: 'UNMATCHED', issue: `${unmatched.length} uploaded file${unmatched.length === 1 ? '' : 's'} did not match a known grid pattern; treated as "Other / unclassified".` });

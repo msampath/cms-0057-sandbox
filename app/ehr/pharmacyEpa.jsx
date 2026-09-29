@@ -61,8 +61,6 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi, planTyp
           planType,
           expedited,
           applyException,
-          // Same clock start as the benefit step, so the due time does not move.
-          receivedAt: benefit.clock?.receivedAt,
           caseId: benefit.caseId,
           answers
         })

@@ -25,9 +25,12 @@ const PREINGESTED_PATH = path.join(process.cwd(), 'data', 'preIngestedRules.json
  * key are no-ops at the data level (but logged).
  */
 const MAX_RULES = 10000;
-// Headroom over the ~3,154-rule snapshot for live uploads, so repeated
-// commits cannot grow the rule index without bound.
+// Headroom over the ~3,154-rule snapshot for live uploads. Both the active
+// index and the snapshot on disk are held to it, so repeated commits cannot
+// grow either without bound.
 const MAX_TOTAL_RULES = 8000;
+const PA_VALUES = ['no-auth', 'auth-needed', 'performpa', 'satisfied', 'conditional'];
+const ID_FIELD = /^[A-Za-z0-9._-]{1,64}$/;
 const VENDORS = ['BCBSIL', 'Carelon', 'Lucet', 'EviCore', 'Carelon-or-BCBSIL-conditional'];
 const STRING_FIELDS = [
   'service_code', 'service_category', 'description', 'pa_needed', 'managed_by',
@@ -50,6 +53,14 @@ function normalizeRule(r) {
   if (r.match_type === 'category' && !out.service_category) return null;
   if (!out.description) out.description = out.service_code || out.service_category;
   if (!out.pa_needed) out.pa_needed = 'auth-needed';
+  if (!PA_VALUES.includes(out.pa_needed)) return null;
+  // Category rules match by substring, so a very short category would
+  // match almost any order.
+  if (r.match_type === 'category' && out.service_category.trim().length < 4) return null;
+  // These become URL path segments in the EHR's DTR fetches.
+  for (const k of ['questionnaire_id', 'cql_library_id']) {
+    if (out[k] !== null && !ID_FIELD.test(out[k])) return null;
+  }
   // managed_by picks the UM vendor and lands in the X12 278, so only the
   // known vendors are kept.
   if (!VENDORS.includes(out.managed_by)) out.managed_by = 'BCBSIL';
@@ -85,9 +96,19 @@ export async function POST(request) {
       addedActive++;
     }
   }
-  if (activeByKey.size > MAX_TOTAL_RULES) {
+  // The snapshot's size after this commit, worked out before any write.
+  let snapshotKeys = new Set();
+  try {
+    if (fs.existsSync(PREINGESTED_PATH)) {
+      snapshotKeys = new Set((JSON.parse(fs.readFileSync(PREINGESTED_PATH, 'utf8')).rules || []).map(keyOf));
+    }
+  } catch {
+    // An unreadable snapshot is handled by the write below.
+  }
+  const snapshotAfter = snapshotKeys.size + new Set(incoming.map(keyOf).filter((k) => !snapshotKeys.has(k))).size;
+  if (activeByKey.size > MAX_TOTAL_RULES || snapshotAfter > MAX_TOTAL_RULES) {
     return NextResponse.json(
-      { error: `commit would bring the rule index to ${activeByKey.size} rules, over the ${MAX_TOTAL_RULES} limit` },
+      { error: `commit would bring the rule index to ${Math.max(activeByKey.size, snapshotAfter)} rules, over the ${MAX_TOTAL_RULES} limit` },
       { status: 413 }
     );
   }

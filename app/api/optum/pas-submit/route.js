@@ -26,6 +26,9 @@ export async function POST(request) {
   } catch {
     return NextResponse.json({ error: 'Body must be a JSON FHIR Bundle' }, { status: 400 });
   }
+  if (bundle?.resourceType !== 'Bundle') {
+    return NextResponse.json({ error: 'Body must be a JSON FHIR Bundle' }, { status: 400 });
+  }
 
   try {
     const result = await submitClaim(bundle);

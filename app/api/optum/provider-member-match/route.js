@@ -58,9 +58,12 @@ export async function POST(request) {
     displayId = subject.subscriberId;
     subjectNpi = subject.npi;
   }
-  // Client-supplied npi wins -- lets the /um panel's active NPI attach
-  // the log entry to that panel regardless of which subject was picked.
-  const logNpi = body?.npi || subjectNpi;
+  // The /um panel sends its active NPI so the entry shows in that panel.
+  // A demo patient is attributed only to its own NPI, so a caller cannot
+  // attach one member to another provider's panel. Sandbox members are not
+  // demo patients, so the panel NPI is kept for them.
+  const clientNpi = typeof body?.npi === 'string' && /^[A-Za-z0-9-]{1,20}$/.test(body.npi) ? body.npi : null;
+  const logNpi = source === 'demo' ? subjectNpi : clientNpi;
 
   try {
     const result = await bulkMemberMatch(subject);

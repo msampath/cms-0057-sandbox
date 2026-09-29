@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction, getDrugPaRecord, upsertDrugPaRecord, nextRequestId } from '@/lib/db';
 import { resolvePharmacyRouting } from '@/lib/routing';
-import { DRUG_CATALOG, DRUG_DENIAL_REASONS, decideDrugPa } from '@/lib/drugPa';
+import { DRUG_CATALOG, DRUG_DENIAL_REASONS, decideDrugPa, sanitizeDrugAnswers } from '@/lib/drugPa';
 import { decisionClock } from '@/lib/decisionClock';
 import { getPatient, PATIENT_LIST } from '@/lib/patients';
 import {
@@ -28,14 +28,23 @@ import { withUsage } from '@/lib/withUsage';
  * Structured NCPDP payloads are logged without patient meta, like the X12
  * 278 request, so the access APIs only see the plain-text determination.
  */
+// ePA case → the time the benefit step opened it. The server keeps the
+// clock start, so a client cannot move it, and a submit may only reuse a
+// case this server opened. Capped like the other in-memory maps.
+const caseStarts = new Map();
+function rememberCase(caseId, receivedAt) {
+  caseStarts.set(caseId, receivedAt);
+  while (caseStarts.size > 2000) caseStarts.delete(caseStarts.keys().next().value);
+}
+
 async function handlePOST(request) {
   const body = await request.json().catch(() => ({}));
   const { step, drugKey, patientId, prescriberNpi = 'unknown' } = body;
   const expedited = body.expedited === true;
-  // A client clock start is accepted only within the last hour, so a
-  // caller cannot skew the published decision times.
-  const t = Date.parse(body.receivedAt);
-  const receivedAt = Number.isFinite(t) && t <= Date.now() + 60_000 && t >= Date.now() - 3_600_000 ? new Date(t).toISOString() : undefined;
+  // The clock starts when the benefit step opens the case. A submit
+  // reuses that start, whatever the client sends.
+  const knownCase = typeof body.caseId === 'string' && caseStarts.has(body.caseId);
+  const receivedAt = step === 'submit' && knownCase ? caseStarts.get(body.caseId) : new Date().toISOString();
   const ID = /^[A-Za-z0-9._-]{1,64}$/;
   const drug = typeof drugKey === 'string' && Object.hasOwn(DRUG_CATALOG, drugKey) ? DRUG_CATALOG[drugKey] : null;
   if (!drug || typeof patientId !== 'string' || !ID.test(patientId) || !['benefit', 'submit'].includes(step)) {
@@ -76,6 +85,7 @@ async function handlePOST(request) {
 
   if (step === 'benefit') {
     const caseId = nextRequestId('EPA');
+    rememberCase(caseId, receivedAt);
     const args = { drugKey, patientId, prescriberNpi, pbm, caseId };
     const formulary = formularyLookup(drugKey);
     const messages = [
@@ -113,8 +123,10 @@ async function handlePOST(request) {
   }
 
   // step === 'submit'
-  const caseId = body.caseId || nextRequestId('EPA');
-  const answers = body.answers || {};
+  // Only a case this server opened is reused, so a client cannot overwrite
+  // another request's metrics row.
+  const caseId = knownCase ? body.caseId : nextRequestId('EPA');
+  const answers = sanitizeDrugAnswers(drugKey, body.answers);
   // Like a PAS Bundle with no QuestionnaireResponse, an empty answer set
   // is not a decision by the shared model: it does not change the shared
   // record's determination, and the metrics and access APIs leave it out.

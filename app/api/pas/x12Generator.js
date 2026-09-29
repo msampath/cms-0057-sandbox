@@ -1,3 +1,5 @@
+import { claimDiagnosisCodes } from '@/lib/routing';
+
 /**
  * FHIR Bundle → X12 278 projection.
  *
@@ -21,18 +23,20 @@ const VENDOR_TO_ISA = {
   EviCore: 'EVICORE0001'
 };
 
-// UM service-type lookup table
-// Imaging (CPT 7xxxx) → '3' Consultation
-// J-codes (drug/biologic infusion) → '73' Diagnostic Medical
-// BH category rules → 'MH' Mental Health
-// Anything else → 'AR' Surgical (default)
+// UM03 service type (X12 element 1365):
+//   BH category rules            → MH  Mental Health
+//   J-codes (clinic-administered) → 1   Medical Care
+//   CT/MRI imaging (by rule text) → 62  MRI/CAT Scan
+//   other 7xxxx radiology         → 4   Diagnostic X-Ray
+//   10000-69999 surgery           → 2   Surgical
+//   anything else                 → 1   Medical Care
 function pickServiceTypeCode(rule, orderedCode) {
-  if (!rule) return 'AR';
-  if (rule.match_type === 'category') return 'MH';
-  if (!orderedCode) return 'AR';
-  if (orderedCode.startsWith('J')) return '73';
-  if (orderedCode.charAt(0) === '7') return '3';
-  return 'AR';
+  if (rule?.match_type === 'category') return 'MH';
+  const code = String(orderedCode || '');
+  if (/^J\d{4}$/.test(code)) return '1';
+  if (/^7\d{4}$/.test(code)) return /\b(MRI|CT|CAT|magnetic|tomograph)/i.test(rule?.description || '') ? '62' : '4';
+  if (/^\d{5}$/.test(code) && Number(code) >= 10000 && Number(code) <= 69999) return '2';
+  return '1';
 }
 
 // Bundle values go into X12 elements, so the 278 delimiters (~ * : ^) and
@@ -66,14 +70,14 @@ function memberId(coverage, patient) {
 
 // Principal diagnosis from Claim.diagnosis (R4 Patient has no condition).
 function primaryIcd10(claim) {
-  const dx = Array.isArray(claim?.diagnosis) ? claim.diagnosis[0] : null;
-  const v = dx?.diagnosisCodeableConcept?.coding?.[0]?.code || null;
-  return typeof v === 'string' && v ? x12Safe(v).replace(/\./g, '') : null;
+  const v = claimDiagnosisCodes(claim)[0] || null;
+  return v ? x12Safe(v).replace(/\./g, '') : null;
 }
 
 function servicedDate(claim) {
   const item = Array.isArray(claim?.item) ? claim.item[0] : null;
-  const d = x12Safe(item?.servicedDate || new Date().toISOString().slice(0, 10));
+  const v = typeof item?.servicedDate === 'string' ? item.servicedDate.slice(0, 10) : '';
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : new Date().toISOString().slice(0, 10);
   return d.replace(/-/g, '');
 }
 
@@ -194,22 +198,29 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
     );
   }
 
-  push(
-    `DTP*472*D8*${dos}`,
-    `Bundle.entry[?Claim].item[0].servicedDate`,
-    'DTP — Service date',
-    dos
-  );
-
-  // Loop 2000F: the requested service. SV1 carries the procedure code
-  // (HC qualifier covers CPT and HCPCS).
   if (orderedCode) {
+    // Loop 2000F: the requested service. UM, the service date, then SV1
+    // with the procedure code (HC covers CPT and HCPCS).
     push(`HL*5*4*SS*0`, '(protocol)', 'HL — Loop 2000F: Service', '');
+    push(`UM*HS*I*${serviceTypeCode}`, `(derived) ordered code`, 'UM — Service-level review request', serviceTypeCode);
+    push(
+      `DTP*472*D8*${dos}`,
+      `Bundle.entry[?Claim].item[0].servicedDate`,
+      'DTP — Service date',
+      dos
+    );
     push(
       `SV1*HC:${orderedCode}**UN*1`,
       `Bundle.entry[?Claim].item[0].productOrService.coding[0].code`,
       'SV1 — Professional service (procedure code)',
       `HC:${orderedCode}`
+    );
+  } else {
+    push(
+      `DTP*AAH*D8*${dos}`,
+      `Bundle.entry[?Claim].item[0].servicedDate`,
+      'DTP — Event date (no service line)',
+      dos
     );
   }
 

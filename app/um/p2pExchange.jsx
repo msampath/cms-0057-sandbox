@@ -97,8 +97,17 @@ export default function P2PExchangePanel() {
       }
 
       setStep('fetching');
-      const histRes = await authedFetch(apiUrl(`/api/payer-to-payer/history/${encodeURIComponent(memberIdentifier)}`), P2P_SCOPES);
-      const histData = await histRes.json();
+      let histRes, histData;
+      try {
+        histRes = await authedFetch(apiUrl(`/api/payer-to-payer/history/${encodeURIComponent(memberIdentifier)}`), P2P_SCOPES);
+        histData = await histRes.json().catch(() => null);
+      } catch (e) {
+        // The match succeeded, so Step 2 keeps its response.
+        if (!current()) return;
+        setStep('error');
+        setHistoryError(String(e.message || e));
+        return;
+      }
       if (!current()) return;
       if (!histRes.ok) {
         // The match itself succeeded, so Step 2 keeps its response.

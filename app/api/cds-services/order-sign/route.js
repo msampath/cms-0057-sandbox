@@ -137,7 +137,9 @@ function buildCoverageInformationAction({
   routing,
   paNeededValue,
   goldCard,
-  categoryDefault
+  categoryDefault,
+  hardStop,
+  orderId
 }) {
   // pa-needed mapping:
   //   no-PA rule           → 'no-auth'
@@ -149,6 +151,8 @@ function buildCoverageInformationAction({
   const covered =
     goldCard
       ? 'covered'
+      : hardStop
+      ? 'not-covered'
       : !rule && categoryDefault
       ? categoryDefault.default_rule?.covered || 'covered'
       : rule?.managed_by === 'Carelon-or-BCBSIL-conditional' && !routing.reason
@@ -159,6 +163,7 @@ function buildCoverageInformationAction({
     type: 'update',
     description: 'Coverage information for ordered service',
     resource: coverageInformationOrder({
+      orderId,
       patientId,
       orderedCode,
       serviceText: serviceCategory,
@@ -176,16 +181,21 @@ async function handlePOST(request) {
   const body = await request.json();
 
   // Accept either a CDS-Hooks-shaped payload or the simulator's relaxed shape.
-  const orderedCode = body.code || body.serviceCode;
-  const serviceCategory = body.serviceCategory || null;
-  const planType = body.planType || null;
+  const str = (v) => (typeof v === 'string' && v ? v : null);
+  const orderedCode = str(body.code) || str(body.serviceCode);
+  const serviceCategory = str(body.serviceCategory);
+  const planType = str(body.planType);
   const patient = body.patient || body.patientResource || null;
   const patientId =
     (patient && patient.id) || body.patientId || 'unknown';
   const coverageId =
     (body.coverage && body.coverage.id) || body.coverageId || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
-  const practitionerNpi = body.practitionerNpi || body.npi || null;
+  const practitionerNpi = str(body.practitionerNpi) || str(body.npi);
+  // CDS Hooks order-sign sends the order in context.draftOrders. When it
+  // is there, the coverage-information update targets that order's id.
+  const draftOrder = Array.isArray(body.context?.draftOrders?.entry) ? body.context.draftOrders.entry[0]?.resource : null;
+  const draftOrderId = typeof draftOrder?.id === 'string' ? draftOrder.id : null;
 
   logTransaction(
     'CRD Gateway',
@@ -205,6 +215,12 @@ async function handlePOST(request) {
   const categoryDefault = !rule
     ? findCategoryDefault(db.service_categories, orderedCode, serviceCategory)
     : null;
+  // Cascade step 5: a plan that requires PA by default (COMM-HMO) needs it
+  // for a code with no grid rule and no category default.
+  const planDefault =
+    !goldCard && !rule && !categoryDefault
+      ? (db.plans || []).find((p) => p.plan_type === planType && p.requires_pa_by_default) || null
+      : null;
 
   // Diagnoses travel with the hook as Condition resources (R4 Patient has
   // no condition element).
@@ -234,6 +250,23 @@ async function handlePOST(request) {
         `**${categoryDefault.category.category_name}** service category. ` +
         `Category default: covered=${def.covered}, pa_needed=${def.pa_needed}.`,
       source: sourceForRule(rule)
+    };
+  } else if (!rule && planDefault) {
+    card = {
+      summary: 'Prior authorization required (plan default)',
+      indicator: 'warning',
+      detail:
+        `No grid rule for **${orderedCode || serviceCategory || 'this service'}**, but ${planDefault.plan_name || planType} ` +
+        'requires prior authorization by default. Complete the medical necessity Questionnaire before order-sign.',
+      source: sourceForRule(rule),
+      links: [
+        {
+          label: 'Launch DTR SMART App',
+          url: `/dtr/launch?questionnaire=fallback-medical-necessity&code=${encodeURIComponent(orderedCode || '')}`,
+          type: 'smart',
+          appContext: JSON.stringify({ questionnaireId: 'fallback-medical-necessity', cqlLibraryId: null, orderedCode, managedBy: routing.vendor })
+        }
+      ]
     };
   } else if (!rule) {
     card = {
@@ -298,6 +331,8 @@ async function handlePOST(request) {
     ? 'satisfied'
     : !rule && categoryDefault
     ? categoryDefault.default_rule?.pa_needed || 'no-auth'
+    : planDefault
+    ? 'auth-needed'
     : !rule || rule.pa_needed === 'no-auth'
     ? 'no-auth'
     : 'auth-needed';
@@ -311,7 +346,10 @@ async function handlePOST(request) {
     routing,
     paNeededValue,
     goldCard,
-    categoryDefault
+    categoryDefault,
+    // The hard-stop card blocks a non-covered order, so the order says so.
+    hardStop: card?.indicator === 'hard-stop',
+    orderId: draftOrderId
   });
 
   // This log line is the visible "machine-readable PA determination" moment

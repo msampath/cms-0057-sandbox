@@ -24,6 +24,9 @@ export async function POST(request) {
   } catch {
     return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 });
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return NextResponse.json({ error: 'Body must be a JSON object' }, { status: 400 });
+  }
 
   try {
     const result = await fetchQuestionnairePackage(body);

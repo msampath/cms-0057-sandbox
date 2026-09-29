@@ -46,7 +46,7 @@ function PaBlock({ title, m }) {
 
 export default function RegistryMetricsPanel() {
   const { data: registry } = useSWR(apiUrl('/api/registry/endpoints'), fetcher);
-  const { data: metrics, mutate } = useSWR(apiUrl('/api/metrics'), fetcher, { refreshInterval: 3000 });
+  const { data: metrics, error: metricsError, mutate } = useSWR(apiUrl('/api/metrics'), fetcher, { refreshInterval: 3000 });
 
   // Deliberately sends a malformed token so the Patient Access error rate
   // rises. A call with no token at all is counted apart (the demo's
@@ -72,6 +72,7 @@ export default function RegistryMetricsPanel() {
 
   return (
     <div className="space-y-6 text-sm">
+      {metricsError && <div className="text-xs text-red-300">Metrics unavailable ({metricsError.message}). Retrying.</div>}
       <div className="text-xs text-amber-200 bg-amber-950/30 border border-amber-800 rounded px-3 py-2">
         CMS-0062-P is a proposed rule. The reporting below follows its proposals. Counts are in-memory and reset with the demo.
       </div>

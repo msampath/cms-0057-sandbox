@@ -25,8 +25,15 @@ const fetcher = (url) => fetch(url).then((r) => {
   return r.json();
 });
 
+const CODE_SHAPE = /^(\d{5}|\d{4}[A-Z]|[A-Z]\d{4})$/;
+function codeValidityPct(rules) {
+  if (!rules.length) return 0;
+  const valid = rules.filter((r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || ''))).length;
+  return Math.round((valid / rules.length) * 1000) / 10;
+}
+
 export default function UmDashboard() {
-  const { data } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 2000 });
+  const { data, error: logsError } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 2000 });
   // SWR dedupes by key — both this and <RulesExplorer> share the same
   // cached response, no double fetch. The full rule set is large, so it is
   // polled slowly and revalidated right after a commit, load, or reset.
@@ -114,7 +121,9 @@ export default function UmDashboard() {
     setStaging({
       sources: files.map((f) => ({ name: f.name, size: f.size })),
       totalExtracted,
-      codeValidity: errors.length === 0 ? 98 : 85,
+      // Share of extracted rules whose code has a CPT or HCPCS shape.
+      // Category rules carry no code and count as valid.
+      codeValidity: codeValidityPct(rules),
       rules,
       perFile,
       exceptions: allExceptions,
@@ -260,6 +269,7 @@ export default function UmDashboard() {
             metrics={metrics}
             perSource={perSource}
             onCommit={commitRules}
+            committing={committing}
             onReupload={reupload}
           />
         )}
@@ -326,7 +336,8 @@ export default function UmDashboard() {
             <button
               onClick={async () => {
                 if (!confirm('Clear the Live Traffic Feed? Rules and schema are untouched.')) return;
-                await fetch(apiUrl('/api/logs/clear'), { method: 'POST' });
+                await fetch(apiUrl('/api/logs/clear'), { method: 'POST' }).catch(() => {});
+                mutateKey(apiUrl('/api/logs'));
               }}
               className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1 rounded"
             >
@@ -334,7 +345,8 @@ export default function UmDashboard() {
             </button>
           </div>
           <div className="flex-grow overflow-auto bg-black p-4 rounded border border-gray-700 shadow-inner">
-        {!data && <p>Initializing EDI/FHIR Bus…</p>}
+        {!data && !logsError && <p>Initializing EDI/FHIR Bus…</p>}
+        {logsError && <p className="text-red-300">Live feed unavailable ({logsError.message}). Retrying.</p>}
         {data?.logs.map((log) => {
           const isStructured = log.details && typeof log.details === 'object';
           return (
@@ -345,7 +357,8 @@ export default function UmDashboard() {
               {isStructured ? (
                 <>
                   <span className="text-gray-300">
-                    {log.details.note || 'Structured payload — see expander below.'}
+                    {log.details.note ||
+                      (log.details.kind ? 'Structured payload — see expander below.' : JSON.stringify(log.details))}
                   </span>
                   <TranslatorToggle payload={log.details} />
                   <NcpdpToggle payload={log.details} />
@@ -378,6 +391,7 @@ function ResetDemoButton() {
     try {
       await fetch(apiUrl('/api/demo/reset?mode=seeded'), { method: 'POST' });
       mutateKey(apiUrl('/api/rules'));
+      mutateKey(apiUrl('/api/logs'));
     } finally {
       setBusy(false);
     }
@@ -409,6 +423,7 @@ function EmptyStateResetLink() {
     try {
       await fetch(apiUrl('/api/demo/reset?mode=empty'), { method: 'POST' });
       mutateKey(apiUrl('/api/rules'));
+      mutateKey(apiUrl('/api/logs'));
     } finally {
       setBusy(false);
     }
@@ -575,7 +590,7 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extra
   );
 }
 
-function StagingReview({ staging, metrics, perSource, onCommit, onReupload }) {
+function StagingReview({ staging, metrics, perSource, onCommit, committing = false, onReupload }) {
   return (
     <div className="bg-gray-900 p-4 rounded border border-yellow-600">
       <div className="flex justify-between items-start mb-4 gap-4">
@@ -589,16 +604,17 @@ function StagingReview({ staging, metrics, perSource, onCommit, onReupload }) {
           <button
             type="button"
             onClick={onReupload}
-            className="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-slate-100 text-sm whitespace-nowrap"
+            disabled={committing}
+            className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 px-3 py-2 rounded text-slate-100 text-sm whitespace-nowrap"
           >
             ← Back / Re-upload
           </button>
           <button
             onClick={onCommit}
-            disabled={staging.codeValidity < 95}
+            disabled={committing || staging.codeValidity < 95}
             className="bg-green-600 px-4 py-2 rounded text-white font-bold disabled:opacity-50 whitespace-nowrap"
           >
-            Approve &amp; Commit to CRD Engine
+            {committing ? 'Committing…' : <>Approve &amp; Commit to CRD Engine</>}
           </button>
         </div>
       </div>

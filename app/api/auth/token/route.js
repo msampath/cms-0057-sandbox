@@ -31,6 +31,13 @@ export async function POST(request) {
     clientId = typeof c === 'string' ? c : null;
   }
 
+  if (scope.length > 1000 || (clientId && clientId.length > 200)) {
+    return NextResponse.json(
+      { error: 'invalid_request', error_description: 'scope or client_id is too long.' },
+      { status: 400 }
+    );
+  }
+
   if (grantType !== 'client_credentials') {
     return NextResponse.json(
       {

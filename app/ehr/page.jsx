@@ -445,6 +445,7 @@ export default function EhrDashboard() {
   const [cdexTask, setCdexTask] = useState(null);
   const [attachmentResult, setAttachmentResult] = useState(null);
   const [attachmentSending, setAttachmentSending] = useState(false);
+  const selfSignAtRef = useRef(0);
   // Route PAS through the simulated clearinghouse (conformance check), and
   // optionally claim an unsupported PAS version to see it rejected.
   const [viaClearinghouse, setViaClearinghouse] = useState(false);
@@ -793,6 +794,9 @@ export default function EhrDashboard() {
     // Pharmacy-benefit drug orders skip CRD. They go to the PBM over
     // NCPDP (RTPB → F&B → ePA), rendered by the PharmacyEpa panel.
     if (order.siteOfCare === 'self') {
+      // A double click would open two ePA cases.
+      if (Date.now() - selfSignAtRef.current < 1500) return;
+      selfSignAtRef.current = Date.now();
       scenarioVersionRef.current += 1;
       setPharmacyRun((n) => n + 1);
       return;
@@ -910,7 +914,7 @@ export default function EhrDashboard() {
       // prepop-invalidation guard below (which would let an
       // in-flight prepop from the previous questionnaire land its
       // results into indeterminate state).
-      const qRes = await fetch(apiUrl(`/api/questionnaire/${ctx.questionnaireId}`));
+      const qRes = await fetch(apiUrl(`/api/questionnaire/${encodeURIComponent(ctx.questionnaireId)}`));
       if (!qRes.ok) {
         throw new Error(`Questionnaire fetch failed: HTTP ${qRes.status}`);
       }
@@ -983,7 +987,7 @@ export default function EhrDashboard() {
     // is only a reference display, not required for DTR to function.
     if (ctx.cqlLibraryId) {
       try {
-        const cRes = await fetch(apiUrl(`/api/cql/${ctx.cqlLibraryId}`));
+        const cRes = await fetch(apiUrl(`/api/cql/${encodeURIComponent(ctx.cqlLibraryId)}`));
         if (stillCurrent() && cRes.ok) {
           const lib = await cRes.json();
           if (stillCurrent()) {
@@ -2137,7 +2141,7 @@ export default function EhrDashboard() {
             clock={decisionClock({
               planType,
               // A custom-typed drug code (for example J0717) is a drug too.
-              isDrug: Boolean(order.drug || DRUG_BY_HCPCS[order.code]),
+              isDrug: Boolean(order.drug),
               benefit: 'medical',
               expedited,
               receivedAt: pasSentAt

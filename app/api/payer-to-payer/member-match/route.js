@@ -34,6 +34,9 @@ async function handlePOST(request) {
 
   if (typeof coverageToMatch?.subscriberId === 'string' && Object.hasOwn(PATIENT_ID_BY_SUBSCRIBER, coverageToMatch.subscriberId)) {
     matchedPatientId = PATIENT_ID_BY_SUBSCRIBER[coverageToMatch.subscriberId];
+    // This payer is the prior payer here, so only a member it holds prior
+    // coverage for can match. Otherwise the history call would 404.
+    if (!Object.hasOwn(PRIOR_PLAN_HISTORY, matchedPatientId)) matchedPatientId = null;
   }
   if (!matchedPatientId && memberPatient?.id && ALL_PATIENT_IDS.includes(memberPatient.id)) {
     matchedPatientId = memberPatient.id;

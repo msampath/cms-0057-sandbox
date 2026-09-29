@@ -14,8 +14,16 @@ const fetcher = (url) => fetch(url).then((r) => {
  * gold_card_programs. The rules index is large and lives in its own panel.
  */
 export default function SchemaExplorer() {
-  const { data, isLoading } = useSWR(apiUrl('/api/schema'), fetcher, { refreshInterval: 5000 });
+  const { data, error, isLoading } = useSWR(apiUrl('/api/schema'), fetcher, { refreshInterval: 5000 });
   const [tab, setTab] = useState('payer');
+
+  if (error && !data) {
+    return (
+      <div className="bg-gray-800 p-4 rounded border border-red-700 mb-6 text-xs text-red-300">
+        Schema unavailable ({error.message}). Retrying.
+      </div>
+    );
+  }
 
   if (isLoading || !data) {
     return (
