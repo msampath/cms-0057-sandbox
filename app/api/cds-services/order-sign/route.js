@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb, logTransaction } from '@/lib/db';
 import { resolveRouting } from '@/lib/routing';
 import { DRUG_BY_HCPCS, questionnaireIdForDrug } from '@/lib/drugPa';
+import { withUsage } from '@/lib/withUsage';
 
 /**
  * CDS Hooks 2.0 `order-sign` service.
@@ -192,7 +193,7 @@ function buildCoverageInformationAction({
 
 // ---- Handler ---------------------------------------------------------------
 
-export async function POST(request) {
+async function handlePOST(request) {
   const body = await request.json();
 
   // Accept either a CDS-Hooks-shaped payload or the simulator's relaxed shape.
@@ -345,3 +346,6 @@ export async function POST(request) {
     systemActions: [systemAction]
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const POST = withUsage('Prior Authorization', handlePOST);

@@ -13,6 +13,7 @@ import {
   paRequest,
   paResponse
 } from '@/lib/ncpdpGenerator';
+import { withUsage } from '@/lib/withUsage';
 
 /**
  * Pharmacy-benefit drug track (NCPDP), routed to the PBM.
@@ -27,7 +28,7 @@ import {
  * Structured NCPDP payloads are logged without patient meta, like the X12
  * 278 request, so the access APIs only see the plain-text determination.
  */
-export async function POST(request) {
+async function handlePOST(request) {
   const body = await request.json().catch(() => ({}));
   const { step, drugKey, patientId, prescriberNpi = 'unknown', expedited = false } = body;
   const drug = DRUG_CATALOG[drugKey];
@@ -117,7 +118,21 @@ export async function POST(request) {
     'Prime Therapeutics',
     decision.determination === 'approved' ? 'DRUG PA APPROVED' : 'DRUG PA DENIED',
     `${drug.name}, pharmacy benefit, ePA case ${caseId}${reason ? `. Reason: ${reason.text}` : ''}.`,
-    { ...meta, clock, decidedAt: new Date().toISOString() }
+    {
+      ...meta,
+      clock,
+      decidedAt: new Date().toISOString(),
+      pa: {
+        requestId: caseId,
+        category: 'drug',
+        benefit: 'pharmacy',
+        determination: decision.determination,
+        planType,
+        // The benefit step's time when the caller passes it, else now.
+        receivedAt: clock.receivedAt || body.receivedAt || new Date().toISOString(),
+        decidedAt: new Date().toISOString()
+      }
+    }
   );
 
   return NextResponse.json({
@@ -133,3 +148,6 @@ export async function POST(request) {
     messages
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const POST = withUsage('Pharmacy ePA (NCPDP)', handlePOST);

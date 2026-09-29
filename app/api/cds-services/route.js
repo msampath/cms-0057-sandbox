@@ -1,4 +1,9 @@
 import { NextResponse } from 'next/server';
+import { withUsage } from '@/lib/withUsage';
+
+// Parameter-less GET: without this, Next prerenders it at build and the
+// usage wrapper would never run per request.
+export const dynamic = 'force-dynamic';
 
 /**
  * CDS Hooks 2.0 discovery endpoint.
@@ -12,7 +17,7 @@ import { NextResponse } from 'next/server';
  *
  * The response is constant, so build-time static optimization is fine here.
  */
-export async function GET() {
+async function handleGET() {
   return NextResponse.json({
     services: [
       {
@@ -29,3 +34,6 @@ export async function GET() {
     ]
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const GET = withUsage('Prior Authorization', handleGET);

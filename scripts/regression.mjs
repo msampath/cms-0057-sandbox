@@ -395,8 +395,76 @@ async function phase4() {
   check('Payer-to-Payer history carries a prior-plan pharmacy drug PA (use preauthorization, NDC, A1)', priorDrug?.item?.[0]?.productOrService?.coding?.[0]?.code === '50474075010' && pdexReview(priorDrug)?.action === 'A1' && pdexReview(priorDrug)?.category === 'allowedunits');
 }
 
+async function phase5() {
+  console.log('\nPhase 5: reporting and metrics');
+  // Start from the seeded baseline so counts can be checked exactly.
+  await call('/api/demo/reset?mode=seeded', { method: 'POST' });
+  const metrics = async () => (await call('/api/metrics')).json;
+  const usageOf = (m, api) => m?.usage?.find((u) => u.api === api) || { success: 0, unauthenticated: 0, authFailure: 0, serverError: 0, total: 0 };
+
+  const m0 = await metrics();
+  check('after reset: PA metrics count only the seeded decision (1 medical approval)',
+    m0?.priorAuthorization?.medicalItems?.requests === 1 && m0.priorAuthorization.medicalItems.approved === 1 && m0.priorAuthorization.drugs.all.requests === 0,
+    JSON.stringify(m0?.priorAuthorization?.medicalItems));
+  check('after reset: usage counters cleared', (m0?.usage || []).length === 0, JSON.stringify(m0?.usage));
+
+  const reg = await call('/api/registry/endpoints');
+  const eps = (reg.json?.entry || []).map((e) => e.resource);
+  check('endpoint report: 4 base FHIR Endpoint resources', reg.status === 200 && eps.length === 4 && eps.every((e) => e.resourceType === 'Endpoint' && !e.meta?.profile));
+  check('endpoint addresses are absolute and under /cms-0057/api', eps.every((e) => /^https?:\/\/[^/]+\/cms-0057\/api\//.test(e.address)));
+  check('endpoints use hl7-fhir-rest and FHIR JSON', eps.every((e) => e.connectionType?.code === 'hl7-fhir-rest' && e.payloadMimeType?.[0] === 'application/fhir+json'));
+
+  // Usage buckets: no token, bad token, good token.
+  const pTok = await token(['patient/Patient.read', 'patient/Coverage.read', 'patient/ExplanationOfBenefit.read', 'patient/ClaimResponse.read']);
+  await call('/api/patient-access?patientId=pat-8849-jane-doe');
+  await call('/api/patient-access?patientId=pat-8849-jane-doe', { headers: { authorization: 'Bearer not-a-valid-token' } });
+  await call('/api/patient-access?patientId=pat-8849-jane-doe', { headers: { authorization: 'Bearer ' + pTok } });
+  await call('/api/patient-access?patientId=pat-8849-jane-doe', { headers: { authorization: 'Bearer ' + pTok } });
+  const u = usageOf(await metrics(), 'Patient Access');
+  check('usage: no-token 401 counted apart (1)', u.unauthenticated === 1, JSON.stringify(u));
+  check('usage: bad-token 401 counted as auth failure (1)', u.authFailure === 1);
+  check('usage: 2 successes', u.success === 2);
+  check('usage: error rate = 1 of 3 (the no-token step excluded)', u.errorRatePct === 33.3, String(u.errorRatePct));
+
+  // PA metrics: a live approval, a pharmacy drug denial, a forced debug denial.
+  await post('/api/pas/submit', pasBundle('70553'));
+  const ben = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe' })).json;
+  await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', caseId: ben?.caseId, answers: { diagnosis: 'M05.79' } });
+  await post('/api/pas/submit', { ...drugPasBundle('pat-8849-jane-doe', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true }), _simulateDenial: true });
+  // MA pharmacy drug (Part D): excluded from the MA drug metrics.
+  const rb = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'pat-7712-robert-chen' })).json;
+  await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-7712-robert-chen', caseId: rb?.caseId, answers: { diagnosis: 'M05.79', 'conventional-therapy-failed': true, 'tb-screen-negative': true } });
+
+  const m1 = (await metrics())?.priorAuthorization;
+  check('PA metrics: medical items now 2 requests, 2 approved, 100%', m1?.medicalItems?.requests === 2 && m1.medicalItems.approved === 2 && m1.medicalItems.approvedPct === 100, JSON.stringify(m1?.medicalItems));
+  check('PA metrics: forced debug denial not counted', m1?.drugs?.medicalBenefit?.requests === 0, JSON.stringify(m1?.drugs?.medicalBenefit));
+  check('PA metrics: pharmacy drugs 2 requests (1 denied, 1 approved)', m1?.drugs?.pharmacyBenefit?.requests === 2 && m1.drugs.pharmacyBenefit.denied === 1 && m1.drugs.pharmacyBenefit.approved === 1);
+  check('MA-PPO drug row present from the seeded baseline', (m0?.priorAuthorization?.drugs?.byPlan || []).some((p) => p.planType === 'MA-PPO'));
+  const ma = m1?.drugs?.byPlan?.find((p) => p.planType === 'MA-PPO');
+  check('PA metrics: MA drug metrics exclude Part D (0 requests), with note', ma?.requests === 0 && /Part B drugs only/.test(ma?.note || ''), JSON.stringify(ma));
+  const num = (x) => typeof x === 'number';
+  check('PA metrics: decision times reported for items and pharmacy drugs',
+    num(m1?.medicalItems?.avgDecisionSeconds) && num(m1?.medicalItems?.medianDecisionSeconds) &&
+    num(m1?.drugs?.pharmacyBenefit?.avgDecisionSeconds) && num(m1?.drugs?.pharmacyBenefit?.medianDecisionSeconds),
+    JSON.stringify(m1?.drugs?.pharmacyBenefit));
+  const regBundle = (await call('/api/registry/endpoints')).json;
+  check('endpoint report fullUrls carry no fragment and end with the resource id',
+    regBundle?.entry?.length === 4 && regBundle.entry.every((e) => !String(e.fullUrl).includes('#') && String(e.fullUrl).endsWith('/Endpoint/' + e.resource.id)));
+  // Malformed JSON to the pharmacy route is caught by its own validation (400).
+  const badRx = await fetch(BASE + '/api/drug-pa/pharmacy', { method: 'POST', body: '{not json' });
+  check('pharmacy route: malformed JSON → 400', badRx.status === 400, String(badRx.status));
+  check('drug-by-plan lists every configured plan', ['COMM-HMO', 'COMM-PPO', 'MA-PPO'].every((p) => (m1?.drugs?.byPlan || []).some((r) => r.planType === p)));
+  // Malformed JSON is a client error for the PA API, not a server error.
+  const before = usageOf(await metrics(), 'Prior Authorization');
+  const bad = await fetch(BASE + '/api/pas/submit', { method: 'POST', body: '{not json' });
+  const after = usageOf(await metrics(), 'Prior Authorization');
+  check('malformed JSON → 400 OperationOutcome', bad.status === 400 && (await bad.json())?.resourceType === 'OperationOutcome', String(bad.status));
+  check('malformed JSON counted as client error', after.clientError === before.clientError + 1 && after.serverError === before.serverError, JSON.stringify(after));
+  check('drugs requiring PA: grid J-code rules counted', m1?.drugsRequiringPa?.gridJCodeRules > 0 && m1.drugsRequiringPa.catalog.length === 1);
+}
+
 // Phase checks are appended below as each phase lands.
-const PHASES = [baseline, phase1, phase2, phase3, phase4];
+const PHASES = [baseline, phase1, phase2, phase3, phase4, phase5];
 
 console.log(`Regression against ${BASE}`);
 for (const phase of PHASES) await phase();

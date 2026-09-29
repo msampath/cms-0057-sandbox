@@ -24,6 +24,7 @@ import {
   generateX12_278_Response,
   getReceiverId
 } from '../x12Generator';
+import { withUsage } from '@/lib/withUsage';
 
 /**
  * PAS submit endpoint.
@@ -81,7 +82,7 @@ function findRule(rules, orderedCode, serviceCategory) {
   return null;
 }
 
-export async function POST(request) {
+async function handlePOST(request) {
   const bundle = await request.json();
 
   const claim = pickEntry(bundle, 'Claim');
@@ -167,7 +168,8 @@ export async function POST(request) {
   // Legal decision clock (lib/decisionClock.js). Expedited when the Claim
   // priority is stat. Logged with each decision so the UM feed can show it.
   const expedited = claim?.priority?.coding?.[0]?.code === 'stat';
-  const clock = decisionClock({ planType, isDrug: !!drugKey, benefit: 'medical', expedited, receivedAt: new Date().toISOString() });
+  const receivedAt = new Date().toISOString();
+  const clock = decisionClock({ planType, isDrug: !!drugKey, benefit: 'medical', expedited, receivedAt });
   const drugQr = drugKey ? pickEntry(bundle, 'QuestionnaireResponse') : null;
   const drugAnswers = drugKey ? answersFromQuestionnaireResponse(drugQr) : null;
   const drugDecision = drugKey ? decideDrugPa(drugKey, drugAnswers) : null;
@@ -268,7 +270,23 @@ export async function POST(request) {
     );
     logTransaction('PAS Translator', 'FHIR RESPONSE (DENIAL)',
       `ClaimResponse: outcome=complete, reviewAction A3 Not Certified, reason ${reason.code} ${reason.display} (X12 886). Appeal period: 60 days.`,
-      { patientId: patient?.id || 'unknown', clock, decidedAt: new Date().toISOString() }
+      {
+        patientId: patient?.id || 'unknown',
+        clock,
+        decidedAt: new Date().toISOString(),
+        // PA metrics tag. A debug denial of a request the model would
+        // approve is not a decision, so it is marked forced.
+        pa: {
+          requestId: authNumber,
+          category: drugKey ? 'drug' : 'item',
+          benefit: 'medical',
+          determination: 'denied',
+          planType,
+          forced: !!bundle._simulateDenial && drugDecision?.determination !== 'denied',
+          receivedAt,
+          decidedAt: new Date().toISOString()
+        }
+      }
     );
 
     // Response is a PAS response Bundle: the ClaimResponse plus the
@@ -330,12 +348,19 @@ export async function POST(request) {
       // Kept so the final ClaimResponse echoes the same item sequences.
       claimItems: (claim?.item || []).map((it) => ({ sequence: it.sequence })),
       clock,
+      planType,
+      receivedAt,
+      category: drugKey ? 'drug' : 'item',
       decideAfter: Date.now() + reviewWindow(),
     });
 
     logTransaction('PAS Gateway', 'PA PENDED',
       `Auth # ${authNumber} — routed to ${vendor} clinical review queue. rest-hook notification (R4 Subscriptions Backport) will fire on determination.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
-      { patientId: patient?.id || 'unknown', clock }
+      {
+        patientId: patient?.id || 'unknown',
+        clock,
+        pa: { requestId: authNumber, category: drugKey ? 'drug' : 'item', benefit: 'medical', determination: 'pended', planType, receivedAt }
+      }
     );
 
     return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse]));
@@ -409,10 +434,26 @@ export async function POST(request) {
     'PAS Translator',
     'FHIR RESPONSE',
     `ClaimResponse synthesised from preserved Bundle + auth # ${authNumber} (no FHIR→X12→FHIR round-trip).`,
-    { patientId: patient?.id || 'unknown', clock, decidedAt: new Date().toISOString() }
+    {
+      patientId: patient?.id || 'unknown',
+      clock,
+      decidedAt: new Date().toISOString(),
+      pa: {
+        requestId: authNumber,
+        category: drugKey ? 'drug' : 'item',
+        benefit: 'medical',
+        determination: 'approved',
+        planType,
+        receivedAt,
+        decidedAt: new Date().toISOString()
+      }
+    }
   );
 
   return NextResponse.json(
     wrapPasResponseBundle([claimResponse, satisfiedAction.resource])
   );
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const POST = withUsage('Prior Authorization', handlePOST);

@@ -85,7 +85,13 @@ const STEPS = [
     expectAbsent: ['Optum real', 'reached a real implementation']
   },
   { path: '/um', tab: 'P2P Exchange', click: ['Request prior plan data'], expect: ['156.222(b)', 'Step 3', 'DENIED', 'Prior plan drug prior authorizations', '50474075010'] },
-  { path: '/um', tab: 'Standards', expect: ['Sunset marker', '2.2.1', 'January 1, 2028'] }
+  { path: '/um', tab: 'Standards', expect: ['Sunset marker', '2.2.1', 'January 1, 2028'] },
+  {
+    path: '/um',
+    tab: 'Registry & Metrics',
+    click: ['Send a call with a bad token', 'Send a valid call'],
+    expect: ['Endpoint report', 'Patient Access API', '/cms-0057/api/patient-access', 'Error rate', 'Prior authorization metrics', 'J-code rules']
+  }
 ];
 
 // Resource-load failures are checked by URL in the response handler below,

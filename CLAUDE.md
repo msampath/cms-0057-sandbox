@@ -135,6 +135,13 @@ Certolizumab pegol (Cimzia) is the demo drug because its real grid row (J0717, 2
 - `/pharmacy` → `GET /api/pharmacy/pa-status?memberId=&ndc=` (system scopes) returns the same EOBs plus RTPB and F&B, so a dispensing pharmacy sees the decision the prescriber saw
 - `lib/integrationLabel.js` labels the Optum and Availity panels by mode: "sandbox response" when `live`, "sandbox response (saved copy)" when `mock-*`, because no call is made in mock mode
 
+### Reporting and metrics (CMS-0062-P Phase 5)
+
+- `GET /api/registry/endpoints` → a Bundle of base FHIR `Endpoint` resources for the four APIs (the rule's primary proposal; NDH is the alternative and is not claimed). Addresses use the forwarded origin, like SMART discovery
+- `lib/withUsage.js` wraps the API route handlers and records one usage event per call in `lib/db.js`: `success`, `unauthenticated` (401 with no token, the scripted demo step, counted apart), `authFailure` (bad token or 403), `clientError`, `serverError`. Error rate = (authFailure + serverError) / (success + authFailure + serverError). A new API route should export its handler through `withUsage()`
+- Every PA decision log entry carries a `pa` tag (`requestId`, `category` item or drug, `benefit`, `determination`, `planType`, times, `forced`). `lib/paMetrics.js` builds the metrics from those tags, so seeded and live traffic count alike. The seed's Jane Doe approval carries one. Forced debug denials are excluded, and MA drug metrics cover Part B only
+- `GET /api/metrics` and the `/um` Registry & Metrics tab show both. Usage counters reset with the demo
+
 ### Rule Ingestion Pipeline (`app/api/extract/`, `app/api/commit-rules/`, `scripts/extractPreIngested.py`)
 
 1. Upload PA grid PDF via `/um` UI

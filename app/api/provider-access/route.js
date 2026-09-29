@@ -3,6 +3,7 @@ import { getLog } from '@/lib/db';
 import { getPatient } from '@/lib/patients';
 import { requireScopes, AUTH_ENABLED } from '@/lib/auth';
 import { drugPriorAuthEobs } from '@/lib/drugPaAccess';
+import { withUsage } from '@/lib/withUsage';
 
 // SMART on FHIR v2 scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -11,7 +12,7 @@ const REQUIRED_SCOPES = [
   'system/ClaimResponse.read',
 ];
 
-export async function GET(request) {
+async function handleGET(request) {
   // Demo JWT enforcement (backend-services flavor): 401 without a Bearer
   // token, 403 on missing scopes. Production would require a signed client
   // assertion and token introspection rather than a shared demo secret.
@@ -71,3 +72,6 @@ export async function GET(request) {
     patients,
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const GET = withUsage('Provider Access', handleGET);

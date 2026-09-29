@@ -9,6 +9,7 @@ import {
   reviewAdjudication
 } from '@/lib/fhir';
 import { requireScopes } from '@/lib/auth';
+import { withUsage } from '@/lib/withUsage';
 
 const REQUIRED_SCOPES = [
   'system/Coverage.read',
@@ -94,7 +95,7 @@ function priorPaToClaimResponse(pa, patientId, priorPayer) {
   return cr;
 }
 
-export async function GET(request, { params }) {
+async function handleGET(request, { params }) {
   const denied = requireScopes(request, REQUIRED_SCOPES);
   if (denied) return denied;
 
@@ -197,3 +198,6 @@ export async function GET(request, { params }) {
     }))
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const GET = withUsage('Payer-to-Payer', handleGET);

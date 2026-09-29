@@ -4,6 +4,7 @@ import { PATIENT_ID_BY_SUBSCRIBER } from '@/lib/patients';
 import { DRUG_CATALOG } from '@/lib/drugPa';
 import { drugPriorAuthEobs } from '@/lib/drugPaAccess';
 import { formularyLookup } from '@/lib/ncpdpGenerator';
+import { withUsage } from '@/lib/withUsage';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,7 @@ const REQUIRED_SCOPES = ['system/ExplanationOfBenefit.read', 'system/Coverage.re
  * from the pharmacy track. The benefit block is a demo envelope, like the
  * Patient Access response.
  */
-export async function GET(request) {
+async function handleGET(request) {
   const denied = requireScopes(request, REQUIRED_SCOPES);
   if (denied) return denied;
 
@@ -74,3 +75,6 @@ export async function GET(request) {
     }
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const GET = withUsage('Pharmacy PA lookup', handleGET);

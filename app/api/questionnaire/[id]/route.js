@@ -3,6 +3,7 @@ import path from 'path';
 import { NextResponse } from 'next/server';
 import { logTransaction } from '@/lib/db';
 import { drugKeyForQuestionnaire, drugQuestionnaire } from '@/lib/drugPa';
+import { withUsage } from '@/lib/withUsage';
 
 /**
  * GET /api/questionnaire/[id]
@@ -11,7 +12,7 @@ import { drugKeyForQuestionnaire, drugQuestionnaire } from '@/lib/drugPa';
  * during Phase 1 artifact binding. The DTR surface fetches this on SMART
  * launch and renders item[] dynamically.
  */
-export async function GET(_request, { params }) {
+async function handleGET(_request, { params }) {
   const { id } = params;
 
   // Defensive: only allow simple ids (no path traversal).
@@ -38,3 +39,6 @@ export async function GET(_request, { params }) {
   logTransaction('DTR Gateway', 'QUESTIONNAIRE SERVED', `Served Questionnaire/${id} (${json.item?.length ?? 0} items).`);
   return NextResponse.json(json);
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const GET = withUsage('Prior Authorization', handleGET);

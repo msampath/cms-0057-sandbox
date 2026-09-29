@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PRIOR_PLAN_HISTORY, PATIENT_ID_BY_SUBSCRIBER } from '@/lib/patients';
 import { requireScopes } from '@/lib/auth';
+import { withUsage } from '@/lib/withUsage';
 
 // System scopes the new payer's backend service presents when calling the
 // prior payer.
@@ -13,7 +14,7 @@ const REQUIRED_SCOPES = ['system/Patient.read', 'system/Coverage.read'];
 // Also allow matching by patientId directly (demo convenience).
 const ALL_PATIENT_IDS = Object.keys(PRIOR_PLAN_HISTORY);
 
-export async function POST(request) {
+async function handlePOST(request) {
   const denied = requireScopes(request, REQUIRED_SCOPES);
   if (denied) return denied;
 
@@ -80,3 +81,6 @@ export async function POST(request) {
     ],
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const POST = withUsage('Payer-to-Payer', handlePOST);

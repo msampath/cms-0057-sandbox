@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { finalizePendedIfDue } from '@/lib/pendedReview';
+import { withUsage } from '@/lib/withUsage';
 
 /**
  * Polling endpoint for pended PA requests. Finalization is request-driven:
@@ -9,7 +10,7 @@ import { finalizePendedIfDue } from '@/lib/pendedReview';
  * production. This keeps the flow correct on scale-to-zero hosts where no
  * background timer can be trusted to fire.
  */
-export async function GET(request, { params }) {
+async function handleGET(request, { params }) {
   const req = finalizePendedIfDue(params.id);
   if (!req) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({
@@ -19,3 +20,6 @@ export async function GET(request, { params }) {
     responseBundle: req.responseBundle || null
   });
 }
+
+// Usage metrics (CMS-0062-P): one event per call, bucketed by outcome.
+export const GET = withUsage('Prior Authorization', handleGET);
