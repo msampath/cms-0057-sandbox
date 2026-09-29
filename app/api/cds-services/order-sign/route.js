@@ -190,9 +190,8 @@ async function handlePOST(request) {
   // is there, the coverage-information update targets that order's id.
   // The first ServiceRequest among the draft orders. Its CPT or HCPCS coding
   // is the ordered code. Another order type is not treated as a service.
-  const draftOrder = (Array.isArray(body.context?.draftOrders?.entry) ? body.context.draftOrders.entry : [])
-    .map((e) => e?.resource)
-    .find((r) => r?.resourceType === 'ServiceRequest') || null;
+  const draftEntries = Array.isArray(body.context?.draftOrders?.entry) ? body.context.draftOrders.entry : [];
+  const draftOrder = draftEntries.map((e) => e?.resource).find((r) => r?.resourceType === 'ServiceRequest') || null;
   const draftOrderId = typeof draftOrder?.id === 'string' ? draftOrder.id : null;
   // CPT or HCPCS, whether the client writes the system with http or https.
   const BILLING_SYSTEMS = ['www.ama-assn.org/go/cpt', 'www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets'];
@@ -217,9 +216,10 @@ async function handlePOST(request) {
     : null;
   const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || fhirId(prefetchCoverage?.id) || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
-  // A draft order the payer cannot read (no CPT or HCPCS coding) gets no
-  // coverage answer, rather than a "not on the grid" no-auth.
-  const unreadableOrder = !!draftOrder && !orderedCode && !serviceCategory;
+  // Draft orders the payer cannot read (no ServiceRequest with a CPT or
+  // HCPCS coding, for example only a MedicationRequest) get no coverage
+  // answer, rather than a "not on the grid" no-auth.
+  const unreadableOrder = draftEntries.length > 0 && !orderedCode && !serviceCategory;
   // A CDS Hooks client names the user as context.userId (Practitioner/<id>).
   // The demo practitioners' NPIs come from lib/patients.js.
   const userPractitionerId = typeof body.context?.userId === 'string' ? body.context.userId.replace(/^Practitioner\//, '') : null;
@@ -247,7 +247,7 @@ async function handlePOST(request) {
   // Cascade step 5: a plan that requires PA by default (COMM-HMO) needs it
   // for a code with no grid rule and no category default.
   const planDefault =
-    !goldCard && !rule && !categoryDefault
+    !goldCard && !rule && !categoryDefault && !unreadableOrder
       ? (db.plans || []).find((p) => p.plan_type === planType && p.requires_pa_by_default) || null
       : null;
 

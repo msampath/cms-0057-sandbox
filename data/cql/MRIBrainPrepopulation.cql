@@ -7,8 +7,9 @@
  *   curl -X POST https://cql-translation-service.dev.cqframework.org/cql/translator \
  *        -H "Content-Type: application/cql" -H "Accept: application/elm+json" \
  *        --data-binary @data/cql/MRIBrainPrepopulation.cql > data/cql/elm/MRIBrainPrepopulation.elm.json
- * Translator output calls FHIRHelpers, so its ELM must be registered in
- * lib/cql.js too. Run node scripts/testElm.mjs after regenerating.
+ * Translator output includes FHIRHelpers, so lib/cql.js must pass a
+ * library repository holding the FHIRHelpers ELM to cql.Library, not only
+ * add a REGISTRY entry. Run node scripts/testElm.mjs after regenerating.
  *
  * The demographic defines feed the questionnaire's identity items.
  * HasRelevantNeuroCondition is an example clinical define -- true if

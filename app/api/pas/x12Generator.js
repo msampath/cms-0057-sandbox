@@ -201,7 +201,7 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
   if (dx) {
     push(
       `HI*ABK:${dx}`,
-      `Bundle.entry[?Claim].diagnosis[0].diagnosisCodeableConcept`,
+      `Bundle.entry[?Claim].diagnosis[type=principal, else lowest sequence].diagnosisCodeableConcept`,
       'HI — Principal diagnosis (ICD-10-CM, ABK)',
       `ABK:${dx}`
     );

@@ -2500,6 +2500,8 @@ function buildQuestionnaireResponse(questionnaire, answers, patient) {
 }
 
 function answerByType(type, value, item) {
+  // An unchecked box is an answer of No, so a required boolean is always answered.
+  if (type === 'boolean') return { valueBoolean: !!value };
   if (value === undefined || value === null || value === '') return null;
   switch (type) {
     case 'boolean':

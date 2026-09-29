@@ -817,6 +817,17 @@ async function hardening() {
   const snomedOrder = snomed?.systemActions?.[0]?.resource;
   check('a draft order coded outside CPT or HCPCS gets the could-not-read card and a conditional answer',
     snomed?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedOrder, 'pa-needed')?.valueCode === 'conditional', snomed?.cards?.[0]?.summary);
+  const snomedHmo = (await post('/api/cds-services/order-sign', { hook: 'order-sign', planType: 'COMM-HMO', practitionerNpi: '1234567890', hookInstance: 'reg-spec-5b', context: { patientId: 'pat-6614-marcus-johnson', draftOrders: snomedDraft } })).json;
+  check('on a PA-by-default plan, an unreadable code still gets the could-not-read card (card and order agree)',
+    snomedHmo?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedHmo?.systemActions?.[0]?.resource, 'pa-needed')?.valueCode === 'conditional', snomedHmo?.cards?.[0]?.summary);
+  const medOnly = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-5c', context: { patientId: 'pat-8849-jane-doe', draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'MedicationRequest', id: 'm2' } }] } } })).json;
+  check('draft orders with only a MedicationRequest get the could-not-read card, not no-auth', medOnly?.cards?.[0]?.summary === 'Ordered code could not be read', medOnly?.cards?.[0]?.summary);
+  const objType = pasBundle('70553');
+  objType.entry[1].resource.diagnosis = [
+    { sequence: 1, type: [{ coding: { code: 'principal' } }], diagnosisCodeableConcept: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'I10' }] } },
+    { sequence: 2, diagnosisCodeableConcept: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'R51.9' }] } }
+  ];
+  check('a diagnosis type with a non-array coding → no 500', (await post('/api/pas/submit', objType)).status === 200);
   const mixedDraft = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'MedicationRequest', id: 'm1' } }, { resource: { resourceType: 'ServiceRequest', id: 'sr-a', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '70553' }] } } }] };
   const mixedHook = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-7', context: { patientId: 'pat-8849-jane-doe', draftOrders: mixedDraft } })).json;
   check('the first ServiceRequest among the draft orders is evaluated', mixedHook?.systemActions?.[0]?.resource?.id === 'sr-a' && mixedHook?.cards?.[0]?.summary === 'Prior authorization required');
