@@ -314,6 +314,9 @@ This phase covers the drug-exclusion removal and the pharmacy part of position 2
   - A small pharmacy lookup surface, member ID and NDC in
   - Returns PA status, plus the RTPB and F&B results from Phase 2, over a FHIR read with a SMART scope
   - Shows that the pharmacy sees the same decision without a proprietary portal
+- Relabel the outbound integration panels in `/ehr` and `/um` by mode:
+  - `live` → "Optum sandbox response" and "Availity sandbox response"
+  - `mock-*` → "Optum sandbox response (saved copy)" and "Availity sandbox response (saved copy)", since no call is made in mock mode
 - Verify → a denied adalimumab PA from Phase 2 appears in all three access APIs and the pharmacy view with the same reason code
 
 ### Phase 5: Reporting and metrics

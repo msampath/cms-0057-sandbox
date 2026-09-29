@@ -9,7 +9,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "screenshots": "node scripts/captureScreenshots.mjs"
+    "screenshots": "node scripts/captureScreenshots.mjs",
+    "regression": "node scripts/regression.mjs",
+    "ui-smoke": "node scripts/uiSmoke.mjs"
   },
   "dependencies": {
     "cql-exec-fhir": "^2.1.6",

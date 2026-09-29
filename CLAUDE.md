@@ -22,11 +22,13 @@ npm run dev          # Start dev server at http://localhost:3000/cms-0057
 npm run build        # Production build
 npm run lint         # ESLint (next/core-web-vitals)
 npm run screenshots  # Playwright capture into docs/screenshots/ (needs a running server)
+npm run regression   # API regression checks (needs a running server)
+npm run ui-smoke     # Playwright load of every surface and /um tab, fails on console errors, 404s, 5xx (needs a running server)
 ```
 
 **Base path**: the app serves under `basePath: '/cms-0057'` everywhere (dev, Docker, prod), so the root URL intentionally 404s. Next rewrites `next/link` and static assets automatically, but **not** literal `fetch('/api/...')` calls in client components. Every client fetch must go through `apiUrl()` in `lib/basePath.js`. A missed call site 404s only in the browser, so a full click-through of all four surfaces is the test.
 
-No test suite exists. Lint is the only automated check.
+No unit test framework. Automated checks are lint plus the two scripts above, run against `npm start` after `npm run build`. Each CMS-0062-P phase adds its checks to `scripts/regression.mjs` (one function per phase) and its surfaces to `scripts/uiSmoke.mjs`.
 
 **Python setup** (optional — only needed for runtime PDF uploads; pre-ingested rules ship in `data/preIngestedRules.json`):
 ```powershell

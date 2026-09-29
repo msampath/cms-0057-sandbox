@@ -30,6 +30,20 @@ export default function TranslatorDrawer({ payload }) {
         )}
       </div>
 
+      {/* HIPAA transition under CMS-0062-P (proposed). The rule sets a
+          compliance date for FHIR PAS. It does not create a separate
+          bridge regime for X12. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 text-[11px]">
+        <div className="border border-cyan-800 bg-cyan-950/30 rounded px-3 py-2 text-cyan-100">
+          <div className="text-[10px] uppercase tracking-widest text-cyan-400 mb-0.5">X12 278, current HIPAA standard</div>
+          Referral certification and authorization standard at 45 CFR 162.1302 today. Under the proposed rule it would stay in use until the FHIR compliance date.
+        </div>
+        <div className="border border-blue-800 bg-blue-950/30 rounded px-3 py-2 text-blue-100">
+          <div className="text-[10px] uppercase tracking-widest text-blue-400 mb-0.5">FHIR PAS, proposed HIPAA standard</div>
+          CMS-0062-P proposes FHIR PAS to replace X12 278 at 45 CFR 162.1302, proposed for adoption together with FHIR R4.0.1, US Core 6.1.0, SMART 2.0.0, CRD, and DTR. CRD is also proposed for the eligibility check that asks whether PA is needed (45 CFR 162.1202). The proposed compliance date is 24 months after the final rule takes effect, 36 for small health plans. Until then, FHIR-only PA APIs rely on CMS enforcement discretion (February 28, 2024).
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         {/* FHIR Bundle */}
         <div className="lg:col-span-4">

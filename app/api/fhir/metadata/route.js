@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { IG_REGISTRY, versionedCanonical } from '@/lib/fhir';
 
 /**
  * FHIR CapabilityStatement (GET [base]/metadata).
@@ -6,13 +7,18 @@ import { NextResponse } from 'next/server';
  * Declares the resources and operations this simulator exposes and the
  * implementation guides it draws from. Content is static by design; FHIR
  * test tooling (Inferno, validator CLIs) probes this endpoint first.
+ *
+ * IG and profile canonicals carry a `|version` suffix wherever the sandbox
+ * implements a specific version (IG_REGISTRY in lib/fhir.js). DTR is listed
+ * without a version because the sandbox's questionnaires are not built to
+ * one.
  */
 
 const CAPABILITY_STATEMENT = {
   resourceType: 'CapabilityStatement',
   id: 'cms-0057-sandbox',
   status: 'active',
-  date: '2026-07-05',
+  date: '2026-09-28',
   publisher: 'CMS-0057-F Interoperability Sandbox (demo)',
   kind: 'instance',
   software: { name: 'cms-0057-sandbox', version: '2.0.0' },
@@ -22,14 +28,9 @@ const CAPABILITY_STATEMENT = {
   },
   fhirVersion: '4.0.1',
   format: ['json'],
-  implementationGuide: [
-    'http://hl7.org/fhir/us/davinci-pas/ImplementationGuide/hl7.fhir.us.davinci-pas',
-    'http://hl7.org/fhir/us/davinci-crd/ImplementationGuide/hl7.fhir.us.davinci-crd',
-    'http://hl7.org/fhir/us/davinci-dtr/ImplementationGuide/hl7.fhir.us.davinci-dtr',
-    'http://hl7.org/fhir/us/davinci-pdex/ImplementationGuide/hl7.fhir.us.davinci-pdex',
-    'http://hl7.org/fhir/us/carin-bb/ImplementationGuide/hl7.fhir.us.carin-bb',
-    'http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core'
-  ],
+  implementationGuide: IG_REGISTRY.filter((ig) => ig.key !== 'cdex').map((ig) =>
+    versionedCanonical(ig.canonical, ig.key)
+  ),
   rest: [
     {
       mode: 'server',
@@ -38,8 +39,10 @@ const CAPABILITY_STATEMENT = {
       resource: [
         {
           type: 'Claim',
-          profile:
+          profile: versionedCanonical(
             'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-claim',
+            'pas'
+          ),
           operation: [
             {
               name: 'submit',
@@ -52,15 +55,19 @@ const CAPABILITY_STATEMENT = {
         },
         {
           type: 'ClaimResponse',
-          profile:
+          profile: versionedCanonical(
             'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-claimresponse',
+            'pas'
+          ),
           documentation:
             'Returned inside the PAS response Bundle and in Payer-to-Payer history Bundles (use: preauthorization).'
         },
         {
           type: 'Patient',
-          profile:
+          profile: versionedCanonical(
             'http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient',
+            'us-core'
+          ),
           operation: [
             {
               name: 'member-match',
@@ -73,13 +80,17 @@ const CAPABILITY_STATEMENT = {
         },
         {
           type: 'Coverage',
-          profile:
-            'http://hl7.org/fhir/us/carin-bb/StructureDefinition/C4BB-Coverage'
+          profile: versionedCanonical(
+            'http://hl7.org/fhir/us/carin-bb/StructureDefinition/C4BB-Coverage',
+            'carin-bb'
+          )
         },
         {
           type: 'ExplanationOfBenefit',
-          profile:
+          profile: versionedCanonical(
             'http://hl7.org/fhir/us/carin-bb/StructureDefinition/C4BB-ExplanationOfBenefit-Professional-NonClinician',
+            'carin-bb'
+          ),
           documentation:
             'CARIN BB shaped EOBs returned by the Patient Access API and in Payer-to-Payer history Bundles.'
         }

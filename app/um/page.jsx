@@ -16,6 +16,7 @@ import RulesExplorer from './rulesExplorer';
 import SchemaExplorer from './schemaExplorer';
 import ProviderAccessPanel from './providerAccess';
 import P2PExchangePanel from './p2pExchange';
+import StandardsPanel from './standardsPanel';
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -35,7 +36,7 @@ export default function UmDashboard() {
   const [files, setFiles] = useState([]);
   const [staging, setStaging] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [tab, setTab] = useState('rules'); // 'rules' | 'feed' | 'provider' | 'p2p'
+  const [tab, setTab] = useState('rules'); // 'rules' | 'feed' | 'provider' | 'p2p' | 'standards'
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -164,6 +165,12 @@ export default function UmDashboard() {
           >
             P2P Exchange
           </button>
+          <button
+            onClick={() => setTab('standards')}
+            className={`px-3 py-1.5 rounded text-sm ${tab === 'standards' ? 'bg-blue-700 text-white font-semibold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+          >
+            Standards
+          </button>
         </div>
         <div className="flex items-center gap-2">
           <ResetDemoButton />
@@ -262,6 +269,18 @@ export default function UmDashboard() {
             </p>
           </div>
           <P2PExchangePanel />
+        </div>
+      )}
+
+      {tab === 'standards' && (
+        <div className="flex-grow overflow-auto">
+          <div className="mb-4 shrink-0">
+            <h2 className="text-lg font-bold text-gray-400">Standards and dates</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              CMS-0062-P (proposed) · 45 CFR 170.215 implementation guides · HIPAA transaction standards
+            </p>
+          </div>
+          <StandardsPanel />
         </div>
       )}
 
