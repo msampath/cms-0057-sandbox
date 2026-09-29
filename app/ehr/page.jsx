@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { apiUrl, BASE_PATH } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
-import { PAS_PROFILES, readReviewAction, versionedCanonical } from '@/lib/fhir';
+import { PAS_PROFILES, readReviewAction, versionedCanonical, billingCodeSystem, PROFESSIONAL_CLAIM_TYPE } from '@/lib/fhir';
 import { buildSubmitAttachmentParameters } from '@/lib/cdex';
 import PharmacyEpa, { SharedRecord } from './pharmacyEpa';
 import ClockBadge from '@/app/components/ClockBadge';
@@ -273,14 +273,15 @@ const INDICATOR_STYLES = {
 };
 
 // ---- Patient resource builders (scenario-driven) ---------------------------
-function buildPatientResource(scenario, orderConditions) {
+function buildPatientResource(scenario) {
+  // R4 Patient has no condition element. Diagnoses go on Claim.diagnosis
+  // (PAS) and travel with the CRD hook as Condition resources.
   return {
     resourceType: 'Patient',
     id: scenario.patientId,
     name: [{ family: scenario.family, given: scenario.given }],
     gender: scenario.gender,
-    birthDate: scenario.dob,
-    condition: orderConditions || []
+    birthDate: scenario.dob
   };
 }
 
@@ -304,11 +305,20 @@ function buildPractitionerResource(scenario) {
 }
 
 function buildClaimResource(scenario, order, expedited = false) {
+  const diagnoses = (order.conditions || [])
+    .filter((c) => c?.code?.coding?.length)
+    .map((c, i) => ({ sequence: i + 1, diagnosisCodeableConcept: c.code }));
   return {
     resourceType: 'Claim',
     id: `claim-${Date.now()}`,
     status: 'active',
+    type: PROFESSIONAL_CLAIM_TYPE,
     use: 'preauthorization',
+    created: new Date().toISOString(),
+    provider: { reference: `Practitioner/${scenario.practitioner.id}` },
+    insurer: { display: 'BCBSIL' },
+    insurance: [{ sequence: 1, focal: true, coverage: { reference: `Coverage/${scenario.coverageId}` } }],
+    ...(diagnoses.length ? { diagnosis: diagnoses } : {}),
     // stat marks an expedited request, which selects the expedited clock.
     priority: {
       coding: [{ system: 'http://terminology.hl7.org/CodeSystem/processpriority', code: expedited ? 'stat' : 'normal' }]
@@ -320,32 +330,26 @@ function buildClaimResource(scenario, order, expedited = false) {
         productOrService: {
           coding: order.code === 'NOCODE'
             ? []
-            : [{ system: 'http://www.ama-assn.org/go/cpt', code: order.code }],
+            : [{ system: billingCodeSystem(order.code), code: order.code }],
           text: order.category || undefined
-        }
+        },
+        servicedDate: new Date().toISOString().slice(0, 10)
       }
-    ],
-    servicedDate: new Date().toISOString().slice(0, 10)
+    ]
   };
 }
 
-// The PAS endpoint returns a profile-conformant response Bundle
-// (ClaimResponse + coverage-information Task as entries). The bare-
-// ClaimResponse fallback keeps the page tolerant of the older shape.
+// The PAS endpoint returns a profile-conformant response Bundle: the
+// ClaimResponse plus either the order (ServiceRequest) carrying CRD
+// coverage-information or, on a pend, the CDex attachment-request Task.
 function extractPasResponse(json) {
   if (json?.resourceType === 'Bundle') {
     const pick = (type) =>
       json.entry?.find((e) => e?.resource?.resourceType === type)?.resource ||
       null;
-    return { claimResponse: pick('ClaimResponse'), task: pick('Task') };
+    return { claimResponse: pick('ClaimResponse'), order: pick('ServiceRequest'), task: pick('Task') };
   }
-  if (json?.resourceType === 'ClaimResponse') {
-    return {
-      claimResponse: json,
-      task: json.systemActions?.[0]?.resource || null
-    };
-  }
-  return { claimResponse: null, task: null };
+  return { claimResponse: null, order: null, task: null };
 }
 
 // Epic's well-known public FHIR sandbox test patients, for the Epic Backend
@@ -701,32 +705,42 @@ export default function EhrDashboard() {
     // and paint the old patient's determination into the newly
     // selected patient's state.
     const pollVersion = scenarioVersionRef.current;
+    // Set by the cleanup, so a fetch already in flight when pendedId
+    // changes (re-sign, re-submit) cannot write its result afterwards.
+    let cancelled = false;
+    const stale = () => cancelled || scenarioVersionRef.current !== pollVersion;
     const iv = setInterval(async () => {
       try {
         const res = await fetch(apiUrl(`/api/pas/pended/${pendedId}`));
         if (res.status === 404) {
           // The pended request is gone (demo reset or a restart). Stop polling.
           clearInterval(iv);
-          if (scenarioVersionRef.current !== pollVersion) return;
+          if (stale()) return;
           setPendedId(null);
+          setPasResponse(null);
+          setPasSentAt(null);
+          setCdexTask(null);
           setClearinghouseRejection({ _via: 'pas', issue: [{ severity: 'error', diagnostics: 'The pended request no longer exists on the payer (demo reset or restart). Submit it again.' }] });
           return;
         }
         if (!res.ok) return;
         const data = await res.json();
-        if (scenarioVersionRef.current !== pollVersion) return;
+        if (stale()) return;
         if (data.status === 'finalized') {
           clearInterval(iv);
-          const { claimResponse, task } = extractPasResponse(data.responseBundle);
+          const { claimResponse, order: finalOrder } = extractPasResponse(data.responseBundle);
           setPasResponse(claimResponse);
           setPasDecidedAt(new Date().toISOString());
-          setSystemAction(task);
+          setSystemAction(finalOrder);
           setWasPended(true);
           setPendedId(null);
         }
       } catch { /* ignore transient network errors */ }
     }, 2000);
-    return () => clearInterval(iv);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
   }, [pendedId]);
 
   // If the user typed a custom code, synthesize an order around it with
@@ -738,7 +752,9 @@ export default function EhrDashboard() {
         label: `Custom: ${trimmedCustom}`,
         code: trimmedCustom,
         category: null,
-        conditions: []
+        conditions: [],
+        // A typed HCPCS drug code is the same drug order as the preset.
+        drug: Object.hasOwn(DRUG_BY_HCPCS, trimmedCustom) ? DRUG_BY_HCPCS[trimmedCustom] : undefined
       }
     : ORDER_OPTIONS[selectedIndex];
 
@@ -791,7 +807,7 @@ export default function EhrDashboard() {
     const myVersion = scenarioVersionRef.current;
     const stillCurrent = () => scenarioVersionRef.current === myVersion;
 
-    const patient = buildPatientResource(scenario, order.conditions);
+    const patient = buildPatientResource(scenario);
     const coverage = buildCoverageResource(scenario);
     const payload = {
       hook: 'order-sign',
@@ -802,6 +818,7 @@ export default function EhrDashboard() {
       practitionerNpi: scenario.npi,
       patient,
       coverage,
+      conditions: order.conditions || [],
       patientId: patient.id,
       coverageId: coverage.id,
       'hard-stop-trigger': hardStopFlag
@@ -949,7 +966,7 @@ export default function EhrDashboard() {
     // track from the shared drug PA record, so nothing is re-asked.
     if (order.drug) {
       try {
-        const pid = buildPatientResource(scenario, order.conditions).id;
+        const pid = buildPatientResource(scenario).id;
         const rRes = await fetch(apiUrl(`/api/drug-pa/record?patientId=${encodeURIComponent(pid)}&drugKey=${order.drug}`));
         const { record } = await rRes.json();
         if (stillCurrent() && record?.answers) {
@@ -989,7 +1006,7 @@ export default function EhrDashboard() {
     // questionnaire looks like for this kind of request. Informational
     // only -- the form above continues to drive this sandbox's own PAS
     // submission.
-    const patient = buildPatientResource(scenario, order.conditions);
+    const patient = buildPatientResource(scenario);
     setOptumQuestionnaireLoading(true);
     fetch(apiUrl('/api/optum/dtr-questionnaire'), {
       method: 'POST',
@@ -1011,7 +1028,7 @@ export default function EhrDashboard() {
     const myVersion = scenarioVersionRef.current;
     const stillCurrent = () => scenarioVersionRef.current === myVersion;
 
-    const patient = buildPatientResource(scenario, order.conditions);
+    const patient = buildPatientResource(scenario);
     const coverage = buildCoverageResource(scenario);
     const practitioner = buildPractitionerResource(scenario);
     const claim = buildClaimResource(scenario, order, expedited);
@@ -1078,7 +1095,7 @@ export default function EhrDashboard() {
     if (!stillCurrent()) return; // scenario switched mid-flight
     if (pasResult.status === 'fulfilled') {
       const data = pasResult.value;
-      const { claimResponse, task } = extractPasResponse(data);
+      const { claimResponse, order: responseOrder, task } = extractPasResponse(data);
       if (data?.resourceType === 'OperationOutcome') {
         // The clearinghouse rejected the Bundle before it reached the payer,
         // or the payer rejected the request itself.
@@ -1093,7 +1110,7 @@ export default function EhrDashboard() {
       } else {
         setPasResponse(claimResponse);
         setPasDecidedAt(new Date().toISOString());
-        setSystemAction(task || systemAction);
+        setSystemAction(responseOrder || systemAction);
       }
       if (order.drug) {
         fetch(apiUrl(`/api/drug-pa/record?patientId=${encodeURIComponent(patient.id)}&drugKey=${order.drug}`))
@@ -1591,7 +1608,7 @@ export default function EhrDashboard() {
         <PharmacyEpa
           key={pharmacyRun}
           drugKey={order.drug}
-          patientId={buildPatientResource(scenario, order.conditions).id}
+          patientId={buildPatientResource(scenario).id}
           prescriberNpi={scenario.npi}
           planType={planType}
           expedited={expedited}
@@ -1783,11 +1800,11 @@ export default function EhrDashboard() {
         </div>
       )}
 
-      {/* ---- Persisted coverage-information Task (Da Vinci CRD) -------- */}
+      {/* ---- Order with Da Vinci CRD coverage-information ------------- */}
       {systemAction && (
         <details className="bg-white border border-gray-200 rounded-lg max-w-3xl mb-6 shadow-sm">
           <summary className="cursor-pointer px-4 py-2 text-sm text-gray-700 font-semibold">
-            Da Vinci CRD <code>coverage-information</code> Task (persisted on order)
+            Da Vinci CRD <code>coverage-information</code> on the order ({systemAction.resourceType})
           </summary>
           <pre className="text-xs bg-gray-900 text-green-300 p-3 overflow-auto rounded-b-lg">
             {JSON.stringify(systemAction, null, 2)}

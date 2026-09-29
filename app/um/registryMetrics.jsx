@@ -9,7 +9,10 @@ import { authedFetch } from '@/lib/smartClient';
  * plus percentages. Also lets the viewer send a call with a bad token, to
  * watch the error rate move.
  */
-const fetcher = (url) => fetch(url).then((r) => r.json());
+const fetcher = (url) => fetch(url).then((r) => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 function Stat({ label, value, sub }) {
   return (

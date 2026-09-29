@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { outboundRateLimit } from '@/lib/rateLimit';
 import { fetchEpicPatientBundle, epicBackendMode } from '@/lib/epicBackend';
 import { evaluateCqlLibrary, listCqlLibraries } from '@/lib/cql';
 import { logTransaction } from '@/lib/db';
@@ -25,6 +26,8 @@ export const dynamic = 'force-dynamic';
  * linkIds and marks the prefilled fields.
  */
 export async function POST(request) {
+  const limited = outboundRateLimit('Epic', epicBackendMode());
+  if (limited) return limited;
   let body = {};
   try {
     body = await request.json();
@@ -34,10 +37,17 @@ export async function POST(request) {
   const epicPatientId = body?.epicPatientId;
   const libraryId = body?.libraryId || 'MRIBrainPrepopulation';
 
-  if (!epicPatientId) {
+  if (!epicPatientId || typeof epicPatientId !== 'string') {
     return NextResponse.json(
       { error: 'epicPatientId is required', knownLibraries: listCqlLibraries() },
       { status: 400 }
+    );
+  }
+  // Check the library before any upstream call is spent.
+  if (!listCqlLibraries().includes(libraryId)) {
+    return NextResponse.json(
+      { error: `Unknown CQL library: ${libraryId}`, knownLibraries: listCqlLibraries() },
+      { status: 404 }
     );
   }
 

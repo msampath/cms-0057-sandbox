@@ -3,7 +3,13 @@ import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { apiUrl } from '@/lib/basePath';
 
-const fetcher = (url) => fetch(url).then((r) => r.json());
+// The table shows the first rows of the filtered set. Search narrows it.
+const ROW_LIMIT = 200;
+
+const fetcher = (url) => fetch(url).then((r) => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 /**
  * Rules Explorer.
@@ -120,12 +126,12 @@ export default function RulesExplorer() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((r, i) => {
+                filtered.slice(0, ROW_LIMIT).map((r, i) => {
                   const id = r.service_code || r.service_category;
                   const isSelected = detail === r;
                   return (
                     <tr
-                      key={i}
+                      key={`${r.match_type}|${id}|${r.source_file || ''}|${i}`}
                       onClick={() => setSelected(r)}
                       className={`cursor-pointer ${isSelected ? 'bg-blue-900/40' : 'hover:bg-gray-800/60'}`}
                     >
@@ -146,7 +152,17 @@ export default function RulesExplorer() {
                       </td>
                     </tr>
                   );
-                })
+                }).concat(
+                  filtered.length > ROW_LIMIT
+                    ? [
+                        <tr key="more">
+                          <td colSpan={5} className="px-2 py-2 text-center text-gray-500">
+                            Showing the first {ROW_LIMIT} of {filtered.length} rules. Search to narrow the list.
+                          </td>
+                        </tr>
+                      ]
+                    : []
+                )
               )}
             </tbody>
           </table>

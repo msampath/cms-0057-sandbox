@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * OperationOutcome body; polling URL comes back in Content-Location.
  */
 export async function POST(request) {
-  const limited = outboundRateLimit('Optum');
+  const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let body = {};
   try {

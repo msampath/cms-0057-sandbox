@@ -20,7 +20,10 @@ import StandardsPanel from './standardsPanel';
 import RegistryMetricsPanel from './registryMetrics';
 import ClockBadge from '@/app/components/ClockBadge';
 
-const fetcher = (url) => fetch(url).then((res) => res.json());
+const fetcher = (url) => fetch(url).then((r) => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 export default function UmDashboard() {
   const { data } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 2000 });
@@ -127,13 +130,18 @@ export default function UmDashboard() {
 
   const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
+  const [committing, setCommitting] = useState(false);
   const commitRules = async () => {
+    if (committing) return;
+    setCommitting(true);
     const res = await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(staging.rules) }).catch(() => null);
     if (!res?.ok) {
       const json = await res?.json().catch(() => null);
       window.alert(`Commit failed: ${json?.error || (res ? `HTTP ${res.status}` : 'network error')}. The staged rules are kept.`);
+      setCommitting(false);
       return;
     }
+    setCommitting(false);
     mutateKey(apiUrl('/api/rules'));
     setStaging(null);
     setFiles([]);

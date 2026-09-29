@@ -3,7 +3,10 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { apiUrl } from '@/lib/basePath';
 
-const fetcher = (url) => fetch(url).then((r) => r.json());
+const fetcher = (url) => fetch(url).then((r) => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 /**
  * Schema Explorer — surfaces the non-rule sections of the CRD data model:

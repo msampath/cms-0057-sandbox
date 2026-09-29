@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * is 'live' | 'mock-no-credentials' | 'mock-forced' | 'disabled'.
  */
 export async function GET(request) {
-  const limited = outboundRateLimit('Epic');
+  const limited = outboundRateLimit('Epic', epicBackendMode());
   if (limited) return limited;
   const fhirId = request.nextUrl.searchParams.get('id');
   if (!fhirId) {

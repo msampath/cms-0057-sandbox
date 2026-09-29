@@ -37,7 +37,26 @@ function detectKind(filename) {
   return null;
 }
 
+// One extraction at a time: each spawns pdfplumber for up to two minutes.
+// The /um upload form sends files one after another.
+let extracting = false;
+
 export async function POST(request) {
+  if (Number(request.headers.get('content-length') || 0) > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: `file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, { status: 413 });
+  }
+  if (extracting) {
+    return NextResponse.json({ error: 'another extraction is running, try again shortly' }, { status: 429 });
+  }
+  extracting = true;
+  try {
+    return await extract(request);
+  } finally {
+    extracting = false;
+  }
+}
+
+async function extract(request) {
   let form;
   try {
     form = await request.formData();
@@ -100,8 +119,7 @@ export async function POST(request) {
       return NextResponse.json({
         error: 'extractor exited non-zero',
         exitCode: result.code,
-        stderr: result.stderr,
-        stdout: result.stdout,
+        stderr: result.stderr.slice(-1000),
         hint: result.stderr.includes('pdfplumber') ? 'install pdfplumber: pip install pdfplumber' : undefined
       }, { status: 500 });
     }

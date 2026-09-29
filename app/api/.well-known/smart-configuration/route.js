@@ -15,7 +15,6 @@ import { apiBase } from '@/lib/origin';
 export async function GET(request) {
   const base = apiBase(request);
   return NextResponse.json({
-    issuer: 'cms-0057-sandbox-auth',
     token_endpoint: `${base}/auth/token`,
     grant_types_supported: ['client_credentials'],
     scopes_supported: [

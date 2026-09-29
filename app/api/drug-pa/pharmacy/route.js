@@ -30,7 +30,12 @@ import { withUsage } from '@/lib/withUsage';
  */
 async function handlePOST(request) {
   const body = await request.json().catch(() => ({}));
-  const { step, drugKey, patientId, prescriberNpi = 'unknown', expedited = false } = body;
+  const { step, drugKey, patientId, prescriberNpi = 'unknown' } = body;
+  const expedited = body.expedited === true;
+  // A client clock start is accepted only within the last hour, so a
+  // caller cannot skew the published decision times.
+  const t = Date.parse(body.receivedAt);
+  const receivedAt = Number.isFinite(t) && t <= Date.now() + 60_000 && t >= Date.now() - 3_600_000 ? new Date(t).toISOString() : undefined;
   const ID = /^[A-Za-z0-9._-]{1,64}$/;
   const drug = typeof drugKey === 'string' && Object.hasOwn(DRUG_CATALOG, drugKey) ? DRUG_CATALOG[drugKey] : null;
   if (!drug || typeof patientId !== 'string' || !ID.test(patientId) || !['benefit', 'submit'].includes(step)) {
@@ -50,7 +55,8 @@ async function handlePOST(request) {
   if (body.answers != null && (typeof body.answers !== 'object' || Array.isArray(body.answers))) {
     return NextResponse.json({ error: 'answers must be an object' }, { status: 400 });
   }
-  if (body.caseId != null && (typeof body.caseId !== 'string' || !ID.test(body.caseId))) {
+  // The case id becomes part of a FHIR id, so only FHIR id characters.
+  if (body.caseId != null && (typeof body.caseId !== 'string' || !/^[A-Za-z0-9.-]{1,32}$/.test(body.caseId))) {
     return NextResponse.json({ error: 'caseId must be an identifier string' }, { status: 400 });
   }
 
@@ -60,7 +66,7 @@ async function handlePOST(request) {
   // the member's own plan.
   const member = getPatient(patientId);
   const planType = body.planType || member?.planType || null;
-  const clock = decisionClock({ planType, isDrug: true, benefit: 'pharmacy', expedited, receivedAt: body.receivedAt });
+  const clock = decisionClock({ planType, isDrug: true, benefit: 'pharmacy', expedited, receivedAt });
   // Illustrative FFE issuer exception from the NCPDP requirement. It does
   // not change the decision clock.
   const exception = member?.ncpdpException
@@ -109,6 +115,10 @@ async function handlePOST(request) {
   // step === 'submit'
   const caseId = body.caseId || nextRequestId('EPA');
   const answers = body.answers || {};
+  // Like a PAS Bundle with no QuestionnaireResponse, an empty answer set
+  // is not a decision by the shared model: it does not change the shared
+  // record's determination, and the metrics and access APIs leave it out.
+  const noAnswers = Object.keys(answers).length === 0;
   const decision = decideDrugPa(drugKey, answers);
   const reason = decision.reasonKey ? DRUG_DENIAL_REASONS[decision.reasonKey] : null;
   const args = { drugKey, prescriberNpi, pbm, caseId, answers, decision };
@@ -118,9 +128,17 @@ async function handlePOST(request) {
   ];
   const record = upsertDrugPaRecord(patientId, drugKey, {
     answers,
-    decision,
+    ...(noAnswers ? {} : { decision }),
     track: 'pharmacy',
-    trackData: { ndc: drug.siteOfCare.self.ndc, npi: prescriberNpi, pbm, caseId, determination: decision.determination, reasonKey: decision.reasonKey }
+    trackData: {
+      ndc: drug.siteOfCare.self.ndc,
+      npi: prescriberNpi,
+      pbm,
+      caseId,
+      determination: decision.determination,
+      reasonKey: decision.reasonKey,
+      ...(noAnswers ? { noAnswers: true } : {})
+    }
   });
 
   logTransaction('Prime Therapeutics', `NCPDP PA RESPONSE (${decision.determination.toUpperCase()})`, {
@@ -143,8 +161,9 @@ async function handlePOST(request) {
         benefit: 'pharmacy',
         determination: decision.determination,
         planType,
+        noAnswers,
         // The benefit step's time when the caller passes it, else now.
-        receivedAt: clock.receivedAt || body.receivedAt || new Date().toISOString(),
+        receivedAt: clock.receivedAt || receivedAt || new Date().toISOString(),
         decidedAt: new Date().toISOString()
       }
     }

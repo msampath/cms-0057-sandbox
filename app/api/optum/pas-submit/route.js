@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * CMS-0057-F mandate.
  */
 export async function POST(request) {
-  const limited = outboundRateLimit('Optum');
+  const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let bundle;
   try {

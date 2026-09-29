@@ -47,6 +47,7 @@ export default function P2PExchangePanel() {
   const [patientId, setPatientId] = useState('pat-8849-jane-doe');
   // Bumped per run and on member switch, so a stale run drops its results.
   const runRef = useRef(0);
+  const [historyError, setHistoryError] = useState(null);
   const [step, setStep] = useState('idle'); // idle | matching | matched | fetching | done | error
   const [matchRequest, setMatchRequest] = useState(null);
   const [matchResponse, setMatchResponse] = useState(null);
@@ -61,6 +62,7 @@ export default function P2PExchangePanel() {
     setMatchResponse(null);
     setHistory(null);
     setError(null);
+    setHistoryError(null);
   };
 
   const runExchange = async () => {
@@ -99,8 +101,9 @@ export default function P2PExchangePanel() {
       const histData = await histRes.json();
       if (!current()) return;
       if (!histRes.ok) {
+        // The match itself succeeded, so Step 2 keeps its response.
         setStep('error');
-        setError(histData?.issue?.[0]?.diagnostics || `History fetch failed (HTTP ${histRes.status})`);
+        setHistoryError(histData?.issue?.[0]?.diagnostics || `History fetch failed (HTTP ${histRes.status})`);
         return;
       }
       setHistory(histData);
@@ -155,7 +158,7 @@ export default function P2PExchangePanel() {
             {step === 'matching' ? 'Sending $member-match…' : step === 'fetching' ? 'Fetching history…' : 'Request prior plan data'}
           </button>
           {step !== 'idle' && (
-            <button onClick={reset} className="text-xs text-gray-400 hover:text-gray-200 underline">Reset</button>
+            <button onClick={() => { runRef.current += 1; reset(); }} className="text-xs text-gray-400 hover:text-gray-200 underline">Reset</button>
           )}
         </div>
       </div>
@@ -177,8 +180,8 @@ export default function P2PExchangePanel() {
         <ExchangeStep
           title="Step 2 — $member-match response"
           subtitle={`${priorPayer} → BCBSIL: MemberIdentifier returned in the Parameters resource`}
-          color={step === 'error' ? 'red' : 'green'}
-          badge={step === 'error' ? 'ERROR' : 'MATCHED'}
+          color={error ? 'red' : 'green'}
+          badge={error ? 'ERROR' : 'MATCHED'}
         >
           {error ? (
             <div className="text-red-300 text-xs">{error}</div>
@@ -188,7 +191,15 @@ export default function P2PExchangePanel() {
         </ExchangeStep>
       )}
 
+      {/* An error before any match response (network, token) */}
+      {error && !matchResponse && (
+        <div className="text-red-300 text-xs bg-red-950/40 border border-red-700 rounded p-3">{error}</div>
+      )}
+
       {/* Step 3: clinical history (FHIR searchset Bundle) */}
+      {historyError && (
+        <div className="text-red-300 text-xs bg-red-950/40 border border-red-700 rounded p-3">Step 3 — {historyError}</div>
+      )}
       {history && <HistoryStep bundle={history} />}
     </div>
   );

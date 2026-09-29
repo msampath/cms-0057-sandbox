@@ -93,7 +93,7 @@ const STEPS = [
   { path: '/pharmacy', click: ['Look up PA status'], expect: ['PA status for Certolizumab', 'X12 886 44', 'RTPB', 'F&B formulary'] },
   { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans', 'US Core 6.1.0'] },
   { path: '/patient', name: 'FFE QHP member', click: ['David Kim'], expect: ['Individual market QHP on an FFE (illustrative)'] },
-  { path: '/um', tab: 'Rules & Schema', expect: ['Payer Interop Gateway'] },
+  { path: '/um', tab: 'Rules & Schema', expect: ['70553', 'Showing the first 200'] },
   {
     path: '/um',
     tab: 'Live Traffic Feed',
@@ -151,8 +151,17 @@ async function settle(quietMs = 500, maxMs = 10000) {
     await page.waitForTimeout(100);
   }
 }
+// Any 4xx or 5xx fails the step, apart from the scripted ones: the 401
+// demo steps (no token, or the deliberate bad token) and the clearinghouse
+// rejection.
+const EXPECTED = [
+  (r) => r.status() === 401 && !r.request().headers().authorization,
+  // The Registry & Metrics tab's deliberate bad-token call.
+  (r) => r.status() === 401 && r.request().headers().authorization === 'Bearer not-a-valid-token',
+  (r) => r.status() === 422 && /\/api\/clearinghouse\/pas$/.test(r.url())
+];
 page.on('response', (r) => {
-  if ((r.status() === 404 || r.status() >= 500) && !IGNORED_URLS.some((re) => re.test(r.url()))) {
+  if (r.status() >= 400 && !IGNORED_URLS.some((re) => re.test(r.url())) && !EXPECTED.some((ok) => ok(r))) {
     errors.push(`HTTP ${r.status()} ${r.url()}`);
   }
 });

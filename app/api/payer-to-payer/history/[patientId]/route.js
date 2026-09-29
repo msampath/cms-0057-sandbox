@@ -3,6 +3,7 @@ import { PRIOR_PLAN_HISTORY } from '@/lib/patients';
 import { buildEob, buildPriorAuthEob, CARIN_PROFILES } from '@/lib/eob';
 import { DRUG_CATALOG, DRUG_DENIAL_REASONS } from '@/lib/drugPa';
 import {
+  billingCodeSystem,
   PAS_PROFILES,
   REVIEW_ACTIONS,
   REVIEW_REASONS,
@@ -35,7 +36,6 @@ const REQUIRED_SCOPES = [
  */
 
 const CLAIM_TYPE = 'http://terminology.hl7.org/CodeSystem/claim-type';
-const CPT = 'http://www.ama-assn.org/go/cpt';
 
 function priorPaToClaimResponse(pa, patientId, priorPayer) {
   const notes = [];
@@ -74,7 +74,7 @@ function priorPaToClaimResponse(pa, patientId, priorPayer) {
       {
         itemSequence: [1],
         productOrService: {
-          coding: [{ system: CPT, code: pa.serviceCode }],
+          coding: [{ system: billingCodeSystem(pa.serviceCode), code: pa.serviceCode }],
           text: pa.description
         },
         adjudication: [reviewAdjudication(review)]

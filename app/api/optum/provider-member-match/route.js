@@ -30,7 +30,7 @@ export const dynamic = 'force-dynamic';
  * make different points; the /um panel toggles between them.
  */
 export async function POST(request) {
-  const limited = outboundRateLimit('Optum');
+  const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let body = {};
   try {

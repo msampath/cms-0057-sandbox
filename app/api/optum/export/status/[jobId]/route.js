@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
  * NDJSON file URLs, or a 202 if the export is still running.
  */
 export async function GET(_request, { params }) {
-  const limited = outboundRateLimit('Optum');
+  const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   const { jobId } = params;
   try {

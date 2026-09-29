@@ -244,7 +244,7 @@ export default function ProviderAccessPanel() {
           )}
           <button
             onClick={checkOptum}
-            disabled={optumLoading}
+            disabled={optumLoading || !!exportBusy}
             className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded"
           >
             {optumLoading ? 'Querying Optum…' : 'Run $bulk-member-match'}
@@ -364,7 +364,7 @@ export default function ProviderAccessPanel() {
                         </div>
                         <button
                           onClick={runKickoff}
-                          disabled={exportBusy === 'kickoff'}
+                          disabled={!!exportBusy || optumLoading}
                           className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded"
                         >
                           {exportBusy === 'kickoff' ? 'Kicking off…' : 'POST $davinci-data-export'}
@@ -396,7 +396,7 @@ export default function ProviderAccessPanel() {
                       <div className="text-xs text-violet-300 font-semibold mb-1">Step 2 — poll status</div>
                       <button
                         onClick={runStatusPoll}
-                        disabled={!exportKickoff?.json?.jobId || exportBusy === 'status'}
+                        disabled={!exportKickoff?.json?.jobId || !!exportBusy || optumLoading}
                         className="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-1 rounded"
                       >
                         {exportBusy === 'status' ? 'Polling…' : 'GET $bulk-member-match-status'}
@@ -425,7 +425,7 @@ export default function ProviderAccessPanel() {
                             <button
                               key={f.url}
                               onClick={() => runDownload(f.url)}
-                              disabled={exportBusy === 'download'}
+                              disabled={!!exportBusy || optumLoading}
                               className="block bg-violet-800/60 hover:bg-violet-700 disabled:opacity-40 text-violet-100 text-[11px] font-mono px-2 py-1 rounded text-left"
                             >
                               {f.type} — {f.url}
@@ -553,12 +553,16 @@ function SmartAuthBanner() {
   // The 401 demo beat: call the API with no Authorization header and show
   // the OperationOutcome the server returns.
   const tryWithoutToken = async () => {
-    const res = await fetch(apiUrl('/api/provider-access?npi=1234567890'));
-    const body = await res.json().catch(() => null);
-    setUnauthResult({
-      status: res.status,
-      diagnostics: body?.issue?.[0]?.diagnostics || JSON.stringify(body)
-    });
+    try {
+      const res = await fetch(apiUrl('/api/provider-access?npi=1234567890'));
+      const body = await res.json().catch(() => null);
+      setUnauthResult({
+        status: res.status,
+        diagnostics: body?.issue?.[0]?.diagnostics || JSON.stringify(body)
+      });
+    } catch (e) {
+      setUnauthResult({ status: 0, diagnostics: e.message || 'network error' });
+    }
   };
 
   return (

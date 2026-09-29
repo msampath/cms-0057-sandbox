@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction, addPendingRequest, upsertDrugPaRecord, nextRequestId } from '@/lib/db';
-import { resolveRouting } from '@/lib/routing';
+import { resolveRouting, claimDiagnosisCodes } from '@/lib/routing';
 import {
   DRUG_BY_HCPCS,
   DRUG_DENIAL_REASONS,
@@ -12,13 +12,14 @@ import {
   REVIEW_ACTIONS,
   REVIEW_REASONS,
   X12_REJECT_REASONS,
-  billingCodeSystem,
+  claimTypeOf,
   claimResponseItems,
+  coverageInformationOrder,
   pasErrorClaimResponse,
   wrapPasResponseBundle
 } from '@/lib/fhir';
 import { reviewWindow } from '@/lib/pendedReview';
-import { getPatient } from '@/lib/patients';
+import { getPatient, PATIENT_LIST } from '@/lib/patients';
 import { buildAttachmentRequestTask, ATTACHMENT_NEEDED } from '@/lib/cdex';
 import { apiBase } from '@/lib/origin';
 import { decisionClock, formatClockHours } from '@/lib/decisionClock';
@@ -85,22 +86,41 @@ function findRule(rules, orderedCode, serviceCategory) {
   return null;
 }
 
+function practitionerNpiOf(bundle) {
+  const ids = pickEntry(bundle, 'Practitioner')?.identifier;
+  const v = (Array.isArray(ids) ? ids : []).find((i) => i?.system === 'http://hl7.org/fhir/sid/us-npi')?.value;
+  return typeof v === 'string' && v ? v : null;
+}
+
 export async function handlePOST(request) {
   const bundle = await request.json();
 
   const claim = pickEntry(bundle, 'Claim');
   const patient = pickEntry(bundle, 'Patient');
+  const coverage = pickEntry(bundle, 'Coverage');
+  const str = (v) => (typeof v === 'string' && v ? v : null);
+  const firstItem = Array.isArray(claim?.item) ? claim.item[0] : null;
   const orderedCode =
-    claim?.item?.[0]?.productOrService?.coding?.[0]?.code ||
-    bundle.serviceCode ||
+    str(firstItem?.productOrService?.coding?.[0]?.code) ||
+    str(bundle.serviceCode) ||
     null;
   const serviceCategory =
-    claim?.item?.[0]?.productOrService?.text || bundle.serviceCategory || null;
+    str(firstItem?.productOrService?.text) || str(bundle.serviceCategory) || null;
+  const claimType = claimTypeOf(claim);
+  const coverageId = str(coverage?.id) || getPatient(patient?.id)?.coverageId || null;
   // The EHR sends the plan it is ordering under (its plan selector lets a
   // demo run one patient under another plan's rules). A Bundle without one
   // falls back to the member's own plan, so a conformant PAS client that
   // omits the sandbox field still gets the right rules and decision clock.
   const planType = bundle.planType || getPatient(patient?.id)?.planType || null;
+  // Only a plan this payer knows gets its rules, clock, and metrics row.
+  const knownPlans = [...(getDb().plans || []).map((p) => p.plan_type), ...PATIENT_LIST.map((p) => p.planType)];
+  if (planType !== null && !knownPlans.includes(planType)) {
+    return NextResponse.json(
+      { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'value', diagnostics: `Unknown planType. Known: ${[...new Set(knownPlans)].join(', ')}.` }] },
+      { status: 400 }
+    );
+  }
 
   logTransaction(
     'PAS Gateway',
@@ -132,6 +152,7 @@ export async function handlePOST(request) {
           patientId: patient?.id || 'unknown',
           insurer: 'BCBSIL',
           reason: rejectReason,
+          claimType,
           text: `PAS request Bundle has no ${missing} entry.`
         })
       ])
@@ -141,7 +162,7 @@ export async function handlePOST(request) {
   const db = getDb();
   const rules = planType ? db.rules.filter((r) => ruleMatchesPlan(r, planType)) : db.rules;
   const rule = findRule(rules, orderedCode, serviceCategory);
-  const { vendor } = resolveRouting(rule, patient);
+  const { vendor } = resolveRouting(rule, claimDiagnosisCodes(claim));
 
   // Generate the X12 278 alongside the Bundle (parallel projection, not a
   // destructive conversion).
@@ -186,8 +207,7 @@ export async function handlePOST(request) {
   const recordDrugDecision = (authNumber, { forced = false } = {}) => {
     if (!drugKey) return;
     const hasAnswers = !!drugAnswers && Object.keys(drugAnswers).length > 0;
-    const npi =
-      pickEntry(bundle, 'Practitioner')?.identifier?.find((i) => i?.system === 'http://hl7.org/fhir/sid/us-npi')?.value || null;
+    const npi = practitionerNpiOf(bundle);
     const modelDecision = !forced && hasAnswers;
     upsertDrugPaRecord(patient?.id || 'unknown', drugKey, {
       ...(modelDecision ? { answers: drugAnswers, decision: drugDecision } : {}),
@@ -232,7 +252,7 @@ export async function handlePOST(request) {
       id: `cr-${Date.now()}`,
       meta: { profile: [PAS_PROFILES.claimResponse] },
       status: 'active',
-      type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
+      type: claimType,
       use: 'preauthorization',
       patient: { reference: `Patient/${patient?.id || 'unknown'}` },
       created: new Date().toISOString(),
@@ -255,20 +275,14 @@ export async function handlePOST(request) {
     const deniedAction = {
       type: 'update',
       description: 'Coverage information updated — PA denied',
-      resource: {
-        resourceType: 'Task',
-        status: 'completed',
-        intent: 'proposal',
-        code: { coding: [{ system: 'http://hl7.org/fhir/us/davinci-crd/CodeSystem/temp', code: 'coverage-information' }] },
-        for: { reference: `Patient/${patient?.id || 'unknown'}` },
-        authoredOn: new Date().toISOString(),
-        extension: [
-          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
-          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'auth-needed' },
-          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: billingCodeSystem(orderedCode), code: orderedCode || '' } },
-          { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() }
-        ]
-      }
+      resource: coverageInformationOrder({
+        patientId: patient?.id,
+        orderedCode,
+        serviceText: serviceCategory,
+        coverageId,
+        covered: 'covered',
+        paNeeded: 'auth-needed'
+      })
     };
 
     logTransaction('PAS Gateway', 'COVERAGE-INFORMATION ACTION (DENIAL)',
@@ -297,8 +311,8 @@ export async function handlePOST(request) {
       }
     );
 
-    // Response is a PAS response Bundle: the ClaimResponse plus the
-    // coverage-information Task carried as a second entry.
+    // Response is a PAS response Bundle: the ClaimResponse plus the order
+    // carrying coverage-information as a second entry.
     return NextResponse.json(
       wrapPasResponseBundle([deniedClaimResponse, deniedAction.resource])
     );
@@ -313,7 +327,7 @@ export async function handlePOST(request) {
       id: `cr-${Date.now()}`,
       meta: { profile: [PAS_PROFILES.claimResponse] },
       status: 'active',
-      type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
+      type: claimType,
       use: 'preauthorization',
       patient: { reference: `Patient/${patient?.id || 'unknown'}` },
       created: new Date().toISOString(),
@@ -354,7 +368,9 @@ export async function handlePOST(request) {
       patientId: patient?.id || 'unknown',
       orderedCode,
       // Kept so the final ClaimResponse echoes the same item sequences.
-      claimItems: (claim?.item || []).map((it) => ({ sequence: it.sequence })),
+      claimItems: (Array.isArray(claim?.item) ? claim.item : []).map((it) => ({ sequence: it?.sequence })),
+      coverageId,
+      claimType,
       clock,
       planType,
       receivedAt,
@@ -368,10 +384,7 @@ export async function handlePOST(request) {
     // documentation it needs, as an attachment-request Task returned in the
     // PAS response Bundle. The provider answers with $submit-attachment.
     const member = getPatient(patient?.id);
-    const practitionerNpi =
-      pickEntry(bundle, 'Practitioner')?.identifier?.find((i) => i.system === 'http://hl7.org/fhir/sid/us-npi')?.value ||
-      member?.npi ||
-      'unknown';
+    const practitionerNpi = practitionerNpiOf(bundle) || member?.npi || 'unknown';
     const cdexTask = buildAttachmentRequestTask({
       authNumber,
       patient: {
@@ -424,7 +437,7 @@ export async function handlePOST(request) {
     id: `cr-${Date.now()}`,
     meta: { profile: [PAS_PROFILES.claimResponse] },
     status: 'active',
-    type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/claim-type', code: 'institutional' }] },
+    type: claimType,
     use: 'preauthorization',
     patient: { reference: `Patient/${patient?.id || 'unknown'}` },
     created: new Date().toISOString(),
@@ -441,21 +454,15 @@ export async function handlePOST(request) {
   const satisfiedAction = {
     type: 'update',
     description: 'Coverage information updated post-PAS adjudication',
-    resource: {
-      resourceType: 'Task',
-      status: 'completed',
-      intent: 'proposal',
-      code: { coding: [{ system: 'http://hl7.org/fhir/us/davinci-crd/CodeSystem/temp', code: 'coverage-information' }] },
-      for: { reference: `Patient/${patient?.id || 'unknown'}` },
-      authoredOn: new Date().toISOString(),
-      extension: [
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered', valueCode: 'covered' },
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed', valueCode: 'satisfied' },
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode', valueCoding: { system: billingCodeSystem(orderedCode), code: orderedCode || '' } },
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date', valueDateTime: new Date().toISOString() },
-        { url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#satisfied-pa-id', valueString: authNumber }
-      ]
-    }
+    resource: coverageInformationOrder({
+      patientId: patient?.id,
+      orderedCode,
+      serviceText: serviceCategory,
+      coverageId,
+      covered: 'covered',
+      paNeeded: 'satisfied',
+      satisfiedPaId: authNumber
+    })
   };
 
   logTransaction(

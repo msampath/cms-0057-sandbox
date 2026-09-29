@@ -64,15 +64,16 @@ function memberId(coverage, patient) {
   );
 }
 
-function primaryIcd10(patient) {
-  const cond = patient?.condition?.[0];
-  if (!cond) return null;
-  const v = cond?.code?.coding?.[0]?.code || cond?.code?.text || null;
-  return v === null ? null : x12Safe(v);
+// Principal diagnosis from Claim.diagnosis (R4 Patient has no condition).
+function primaryIcd10(claim) {
+  const dx = Array.isArray(claim?.diagnosis) ? claim.diagnosis[0] : null;
+  const v = dx?.diagnosisCodeableConcept?.coding?.[0]?.code || null;
+  return typeof v === 'string' && v ? x12Safe(v).replace(/\./g, '') : null;
 }
 
 function servicedDate(claim) {
-  const d = x12Safe(claim?.servicedDate || new Date().toISOString().slice(0, 10));
+  const item = Array.isArray(claim?.item) ? claim.item[0] : null;
+  const d = x12Safe(item?.servicedDate || new Date().toISOString().slice(0, 10));
   return d.replace(/-/g, '');
 }
 
@@ -86,7 +87,7 @@ function npi(practitioner) {
 }
 
 export function getReceiverId(vendor) {
-  return VENDOR_TO_ISA[vendor] || VENDOR_TO_ISA.BCBSIL;
+  return typeof vendor === 'string' && Object.hasOwn(VENDOR_TO_ISA, vendor) ? VENDOR_TO_ISA[vendor] : VENDOR_TO_ISA.BCBSIL;
 }
 
 /**
@@ -103,7 +104,7 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
   const { family, given } = patientName(patient);
   const member = memberId(coverage, patient);
   const npiVal = npi(practitioner);
-  const dx = primaryIcd10(patient);
+  const dx = primaryIcd10(claim);
   const dos = servicedDate(claim);
   const serviceTypeCode = pickServiceTypeCode(rule, orderedCode);
 
@@ -153,7 +154,7 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
 
   push(`HL*1**20*1`, '(protocol)', 'HL — Loop 2000A: UMO (payer)', '');
   push(
-    `NM1*X3*2*${vendor.toUpperCase()}*****PI*${receiverId}`,
+    `NM1*X3*2*${x12Safe(vendor || 'BCBSIL').toUpperCase()}*****PI*${receiverId}`,
     `routing.vendor`,
     'NM1 — Payer / UM organisation name',
     vendor
@@ -175,37 +176,42 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
     `${family}, ${given} · ${member}`
   );
 
-  push(`HL*4*3*EV*0`, '(protocol)', 'HL — Loop 2000E: Service', '');
+  push(`HL*4*3*EV*${orderedCode ? 1 : 0}`, '(protocol)', 'HL — Loop 2000E: Patient event', '');
   push(`TRN*1*${trn}*${senderId}`, '(generated) transaction trace', 'TRN — Trace number', trn);
   push(
-    `UM*${serviceTypeCode}*I*${rule?.match_type === 'category' ? 'MH' : '2'}`,
+    `UM*HS*I*${serviceTypeCode}`,
     `(derived) rule.match_type / ordered code shape`,
-    'UM — Service type qualifier',
+    'UM — Health services review, initial request, service type (UM03)',
     serviceTypeCode
   );
 
   if (dx) {
     push(
-      `HI*BK:${dx}*ABK:${orderedCode || ''}`,
-      `Bundle.entry[?Patient].condition[0].code + Bundle.entry[?Claim].item[0].productOrService.coding[0].code`,
-      'HI — Health information (diagnosis + procedure)',
-      `BK:${dx} · ABK:${orderedCode}`
-    );
-  } else {
-    push(
-      `HI*ABK:${orderedCode || ''}`,
-      `Bundle.entry[?Claim].item[0].productOrService.coding[0].code`,
-      'HI — Health information (procedure)',
-      `ABK:${orderedCode}`
+      `HI*ABK:${dx}`,
+      `Bundle.entry[?Claim].diagnosis[0].diagnosisCodeableConcept`,
+      'HI — Principal diagnosis (ICD-10-CM, ABK)',
+      `ABK:${dx}`
     );
   }
 
   push(
     `DTP*472*D8*${dos}`,
-    `Bundle.entry[?Claim].servicedDate`,
+    `Bundle.entry[?Claim].item[0].servicedDate`,
     'DTP — Service date',
     dos
   );
+
+  // Loop 2000F: the requested service. SV1 carries the procedure code
+  // (HC qualifier covers CPT and HCPCS).
+  if (orderedCode) {
+    push(`HL*5*4*SS*0`, '(protocol)', 'HL — Loop 2000F: Service', '');
+    push(
+      `SV1*HC:${orderedCode}**UN*1`,
+      `Bundle.entry[?Claim].item[0].productOrService.coding[0].code`,
+      'SV1 — Professional service (procedure code)',
+      `HC:${orderedCode}`
+    );
+  }
 
   // Trailer: SE03 = segment count from ST through SE inclusive.
   const stIdx = segs.findIndex((s) => s.startsWith('ST*'));

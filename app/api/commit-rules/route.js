@@ -25,6 +25,10 @@ const PREINGESTED_PATH = path.join(process.cwd(), 'data', 'preIngestedRules.json
  * key are no-ops at the data level (but logged).
  */
 const MAX_RULES = 10000;
+// Headroom over the ~3,154-rule snapshot for live uploads, so repeated
+// commits cannot grow the rule index without bound.
+const MAX_TOTAL_RULES = 8000;
+const VENDORS = ['BCBSIL', 'Carelon', 'Lucet', 'EviCore', 'Carelon-or-BCBSIL-conditional'];
 const STRING_FIELDS = [
   'service_code', 'service_category', 'description', 'pa_needed', 'managed_by',
   'questionnaire_id', 'cql_library_id', 'documentation_requirements',
@@ -39,13 +43,16 @@ function normalizeRule(r) {
   const out = { match_type: r.match_type };
   for (const k of STRING_FIELDS) {
     if (r[k] === null || r[k] === undefined) out[k] = null;
-    else if (typeof r[k] === 'string') out[k] = r[k].slice(0, 2000);
+    else if (typeof r[k] === 'string') out[k] = r[k].slice(0, 500);
     else return null;
   }
   if (r.match_type === 'code' && !out.service_code) return null;
   if (r.match_type === 'category' && !out.service_category) return null;
   if (!out.description) out.description = out.service_code || out.service_category;
   if (!out.pa_needed) out.pa_needed = 'auth-needed';
+  // managed_by picks the UM vendor and lands in the X12 278, so only the
+  // known vendors are kept.
+  if (!VENDORS.includes(out.managed_by)) out.managed_by = 'BCBSIL';
   if (Number.isInteger(r.source_page)) out.source_page = r.source_page;
   return out;
 }
@@ -77,6 +84,12 @@ export async function POST(request) {
       activeByKey.set(k, r);
       addedActive++;
     }
+  }
+  if (activeByKey.size > MAX_TOTAL_RULES) {
+    return NextResponse.json(
+      { error: `commit would bring the rule index to ${activeByKey.size} rules, over the ${MAX_TOTAL_RULES} limit` },
+      { status: 413 }
+    );
   }
   db.rules = Array.from(activeByKey.values());
   saveDb(db);

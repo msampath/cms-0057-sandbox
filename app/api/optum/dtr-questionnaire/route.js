@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * pane (which continues to drive the actual PAS submission).
  */
 export async function POST(request) {
-  const limited = outboundRateLimit('Optum');
+  const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let body;
   try {

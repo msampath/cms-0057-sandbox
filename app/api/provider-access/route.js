@@ -21,6 +21,14 @@ async function handleGET(request) {
 
   const { searchParams } = new URL(request.url);
   const npi = searchParams.get('npi');
+  // The panel is per provider. Without an NPI it would list every
+  // provider's attributed patients.
+  if (!npi) {
+    return NextResponse.json(
+      { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'required', diagnostics: 'The npi query parameter is required.' }] },
+      { status: 400 }
+    );
+  }
 
   const log = getLog();
 

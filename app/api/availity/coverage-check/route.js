@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
  * scope/endpoint discovery.
  */
 export async function POST(request) {
-  const limited = outboundRateLimit('Availity');
+  const limited = outboundRateLimit('Availity', availityMode());
   if (limited) return limited;
   let body;
   try {
@@ -38,6 +38,9 @@ export async function POST(request) {
   }
 
   const scenarioId = request.nextUrl.searchParams.get('scenarioId') || undefined;
+  if (scenarioId !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(scenarioId)) {
+    return NextResponse.json({ error: 'scenarioId must be an identifier' }, { status: 400 });
+  }
 
   try {
     const result = await checkCoverage(patient, { scenarioId });

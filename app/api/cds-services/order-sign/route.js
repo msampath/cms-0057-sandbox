@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction } from '@/lib/db';
-import { resolveRouting } from '@/lib/routing';
+import { resolveRouting, conditionCodes } from '@/lib/routing';
 import { DRUG_BY_HCPCS, questionnaireIdForDrug } from '@/lib/drugPa';
 import { withUsage } from '@/lib/withUsage';
-import { billingCodeSystem } from '@/lib/fhir';
+import { coverageInformationOrder } from '@/lib/fhir';
 
 /**
  * CDS Hooks 2.0 `order-sign` service.
@@ -132,6 +132,7 @@ function buildCoverageInformationAction({
   patientId,
   coverageId,
   orderedCode,
+  serviceCategory,
   rule,
   routing,
   paNeededValue,
@@ -141,63 +142,31 @@ function buildCoverageInformationAction({
   // pa-needed mapping:
   //   no-PA rule           → 'no-auth'
   //   auth-needed @ Phase 2 → 'auth-needed'
+  //   gold card             → 'satisfied', with the program as the PA id
   //   auth-needed @ Phase 4 → 'satisfied' (emitted in pas/submit, not here)
-  // The Task must agree with the card: a gold card is covered, and a
+  // The order must agree with the card: a gold card is covered, and a
   // category default carries its own covered value.
   const covered =
     goldCard
       ? 'covered'
       : !rule && categoryDefault
       ? categoryDefault.default_rule?.covered || 'covered'
-      : !rule
-      ? 'not-covered'
-      : rule.managed_by === 'Carelon-or-BCBSIL-conditional' && !routing.reason
+      : rule?.managed_by === 'Carelon-or-BCBSIL-conditional' && !routing.reason
       ? 'conditional'
       : routing.covered || 'covered';
 
   return {
     type: 'update',
     description: 'Coverage information for ordered service',
-    resource: {
-      resourceType: 'Task',
-      status: 'ready',
-      intent: 'proposal',
-      code: {
-        coding: [
-          {
-            system: 'http://hl7.org/fhir/us/davinci-crd/CodeSystem/temp',
-            code: 'coverage-information'
-          }
-        ]
-      },
-      for: { reference: `Patient/${patientId}` },
-      authoredOn: new Date().toISOString(),
-      extension: [
-        {
-          url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#coverage',
-          valueReference: { reference: `Coverage/${coverageId || 'unknown'}` }
-        },
-        {
-          url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#covered',
-          valueCode: covered
-        },
-        {
-          url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#pa-needed',
-          valueCode: paNeededValue
-        },
-        {
-          url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#billingCode',
-          valueCoding: {
-            system: billingCodeSystem(orderedCode),
-            code: orderedCode
-          }
-        },
-        {
-          url: 'http://hl7.org/fhir/us/davinci-crd/StructureDefinition/ext-coverage-information#date',
-          valueDateTime: new Date().toISOString()
-        }
-      ]
-    }
+    resource: coverageInformationOrder({
+      patientId,
+      orderedCode,
+      serviceText: serviceCategory,
+      coverageId,
+      covered,
+      paNeeded: paNeededValue,
+      satisfiedPaId: goldCard ? `GOLDCARD-${String(goldCard.program_name || 'program').replace(/[^A-Za-z0-9]+/g, '-').toUpperCase()}` : null
+    })
   };
 }
 
@@ -237,7 +206,9 @@ async function handlePOST(request) {
     ? findCategoryDefault(db.service_categories, orderedCode, serviceCategory)
     : null;
 
-  const routing = resolveRouting(rule, patient);
+  // Diagnoses travel with the hook as Condition resources (R4 Patient has
+  // no condition element).
+  const routing = resolveRouting(rule, conditionCodes(body.conditions));
   const indicator = goldCard ? 'info' : pickIndicator(rule, hardStopRequested);
 
   // ----- Build card -------------------------------------------------------
@@ -335,6 +306,7 @@ async function handlePOST(request) {
     patientId,
     coverageId,
     orderedCode,
+    serviceCategory,
     rule,
     routing,
     paNeededValue,

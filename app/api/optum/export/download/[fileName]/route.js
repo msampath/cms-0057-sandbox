@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * can show both the shape and the line-by-line breakdown.
  */
 export async function GET(_request, { params }) {
-  const limited = outboundRateLimit('Optum');
+  const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   const { fileName } = params;
   try {
