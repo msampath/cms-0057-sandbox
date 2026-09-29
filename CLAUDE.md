@@ -127,6 +127,14 @@ Certolizumab pegol (Cimzia) is the demo drug because its real grid row (J0717, 2
 - `lib/ncpdpGenerator.js` builds illustrative XML. NCPDP code lists are licensed and not reproduced, and every message says it is not a certified payload
 - Structured NCPDP payloads are logged without patient meta (like the X12 278 request) and render in the `/um` feed through `NcpdpToggle`
 
+### Drug PA in the access APIs and at the pharmacy (CMS-0062-P Phase 4)
+
+- `lib/drugPaAccess.js` → `drugPriorAuthEobs(patientId)` turns each benefit track on a shared drug PA record into a PDex Prior Authorization EOB (`buildPriorAuthEob()` in `lib/eob.js`). Track entries that are not model decisions (`debugForced`, `noAnswers`) are left out. Each track keeps its own `reasonKey`
+- The PDex EOB uses PDex's own `extension-reviewAction` (not the PAS one) on `item.adjudication`, with the `allowedunits` or `denialreason` slice from `PDexAdjudicationDiscriminator`
+- Patient Access returns them as `priorAuthorizations`, Provider Access per attributed patient, and Payer-to-Payer history carries prior-payer drug PAs from `PRIOR_PLAN_HISTORY[*].priorDrugPAs`. `p2pExchange.jsx` splits `use: preauthorization` EOBs from CARIN BB claims
+- `/pharmacy` → `GET /api/pharmacy/pa-status?memberId=&ndc=` (system scopes) returns the same EOBs plus RTPB and F&B, so a dispensing pharmacy sees the decision the prescriber saw
+- `lib/integrationLabel.js` labels the Optum and Availity panels by mode: "sandbox response" when `live`, "sandbox response (saved copy)" when `mock-*`, because no call is made in mock mode
+
 ### Rule Ingestion Pipeline (`app/api/extract/`, `app/api/commit-rules/`, `scripts/extractPreIngested.py`)
 
 1. Upload PA grid PDF via `/um` UI

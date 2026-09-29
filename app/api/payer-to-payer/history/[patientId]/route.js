@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PRIOR_PLAN_HISTORY } from '@/lib/patients';
-import { buildEob, CARIN_PROFILES } from '@/lib/eob';
+import { buildEob, buildPriorAuthEob, CARIN_PROFILES } from '@/lib/eob';
+import { DRUG_CATALOG, DRUG_DENIAL_REASONS } from '@/lib/drugPa';
 import {
   PAS_PROFILES,
   REVIEW_ACTIONS,
@@ -152,7 +153,37 @@ export async function GET(request, { params }) {
     })
   );
 
-  const resources = [priorCoverage, ...claimResponses, ...eobs];
+  // Prior-payer drug PAs as PDex Prior Authorization EOBs. CMS-0062-P
+  // proposes removing the CMS-0057-F drug exclusion from Payer-to-Payer.
+  const drugPaEobs = (history.priorDrugPAs || [])
+    .filter((pa) => DRUG_CATALOG[pa.drugKey])
+    .map((pa) =>
+      buildPriorAuthEob({
+        record: {
+          patientId,
+          drugKey: pa.drugKey,
+          tracks: {
+            [pa.track]: {
+              determination: pa.status,
+              reasonKey: pa.reasonKey || null,
+              [pa.track === 'medical' ? 'authNumber' : 'caseId']: pa.authNumber,
+              at: `${pa.decisionDate}T12:00:00Z`
+            }
+          }
+        },
+        track: pa.track,
+        drug: DRUG_CATALOG[pa.drugKey],
+        reason: pa.reasonKey ? DRUG_DENIAL_REASONS[pa.reasonKey] : null,
+        coverageRef: `Coverage/prior-coverage-${patientId}`,
+        payerDisplay: history.priorPayer,
+        // The prior payer's prescriber is not part of this exchange, so a
+        // display-only reference avoids an unresolvable Practitioner link.
+        practitionerRef: null,
+        providerDisplay: `Prescriber on file with ${history.priorPayer}`
+      })
+    );
+
+  const resources = [priorCoverage, ...claimResponses, ...drugPaEobs, ...eobs];
 
   return NextResponse.json({
     resourceType: 'Bundle',

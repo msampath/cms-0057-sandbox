@@ -5,6 +5,8 @@ import { apiUrl } from '@/lib/basePath';
 import { authedFetch, getDemoToken, decodeJwtPayload } from '@/lib/smartClient';
 import { PATIENT_LIST } from '@/lib/patients';
 import { OPTUM_SANDBOX_MEMBER_LIST } from '@/lib/optumSandboxMembers';
+import DrugPriorAuths from '@/app/components/DrugPriorAuths';
+import { sandboxResponseLabel } from '@/lib/integrationLabel';
 
 const NPI_OPTIONS = [
   { npi: '1234567890', label: 'NPI 1234567890 — Ada Smith, MD' },
@@ -192,10 +194,10 @@ export default function ProviderAccessPanel() {
       {/* Optum real Provider Access -- Da Vinci PDex $bulk-member-match */}
       <div className="bg-violet-950/30 rounded border border-violet-800 p-4">
         <div className="text-xs uppercase tracking-widest text-violet-400 mb-2">
-          Optum real Provider Access ($bulk-member-match)
+          Optum sandbox · Provider Access ($bulk-member-match)
         </div>
         <p className="text-xs text-gray-400 mb-3">
-          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access concept — Optum&apos;s own Da Vinci PDex multi-member-match. Two source choices below make two different points: submitting an Optum sandbox member returns them in <span className="font-mono">MatchedMembers</span> (their sandbox&apos;s canned data recognizes those exact demographics); submitting one of this sandbox&apos;s own demo patients does not — Optum&apos;s roster does not know them — which is the honest outcome and still proves the request reached a real implementation.
+          A second, independent payer&apos;s implementation of the same CMS-0057-F Provider Access concept — Optum&apos;s own Da Vinci PDex multi-member-match. Two source choices below make two different points: submitting an Optum sandbox member returns them in <span className="font-mono">MatchedMembers</span> (their sandbox&apos;s canned data recognizes those exact demographics); submitting one of this sandbox&apos;s own demo patients does not — Optum&apos;s roster does not know them — which is the honest outcome. In live mode that still shows the request reached Optum&apos;s sandbox. In saved-copy mode no call is made and the panel shows a stored sandbox response.
         </p>
 
         <div className="flex gap-2 flex-wrap items-end mb-3">
@@ -251,7 +253,7 @@ export default function ProviderAccessPanel() {
             {optumResult.ok ? (
               <>
                 <div className="text-xs text-violet-300 mb-2">
-                  mode: <span className="font-mono">{optumResult.json.mode}</span>
+                  {sandboxResponseLabel('Optum', optumResult.json.mode)}
                   {optumResult.json.subject && (
                     <span className="ml-2">
                       submitted: <span className="font-semibold text-violet-200">{optumResult.json.subject.name}</span>
@@ -377,7 +379,7 @@ export default function ProviderAccessPanel() {
                         <div className="text-[11px] text-gray-400 mt-1">
                           {exportKickoff.ok ? (
                             <>
-                              HTTP {exportKickoff.json.status || exportKickoff.status} · mode <span className="font-mono">{exportKickoff.json.mode}</span> · jobId <span className="font-mono text-violet-300">{exportKickoff.json.jobId || '(none)'}</span> · Content-Location <span className="font-mono text-violet-300 truncate inline-block max-w-md align-bottom">{exportKickoff.json.contentLocation || '(none)'}</span>
+                              HTTP {exportKickoff.json.status || exportKickoff.status} · {sandboxResponseLabel('Optum', exportKickoff.json.mode)} · jobId <span className="font-mono text-violet-300">{exportKickoff.json.jobId || '(none)'}</span> · Content-Location <span className="font-mono text-violet-300 truncate inline-block max-w-md align-bottom">{exportKickoff.json.contentLocation || '(none)'}</span>
                             </>
                           ) : (
                             <span className="text-red-400">Error: {exportKickoff.json?.error || `HTTP ${exportKickoff.status}`}</span>
@@ -400,7 +402,7 @@ export default function ProviderAccessPanel() {
                         <div className="text-[11px] text-gray-400 mt-1">
                           {exportManifest.ok ? (
                             <>
-                              HTTP {exportManifest.json.status || exportManifest.status} · mode <span className="font-mono">{exportManifest.json.mode}</span> · {exportManifest.json.response?.output?.length || 0} output file(s) · {exportManifest.json.response?.error?.length || 0} error file(s)
+                              HTTP {exportManifest.json.status || exportManifest.status} · {sandboxResponseLabel('Optum', exportManifest.json.mode)} · {exportManifest.json.response?.output?.length || 0} output file(s) · {exportManifest.json.response?.error?.length || 0} error file(s)
                             </>
                           ) : (
                             <span className="text-red-400">Error: {exportManifest.json?.error || `HTTP ${exportManifest.status}`}</span>
@@ -433,7 +435,7 @@ export default function ProviderAccessPanel() {
                           {exportDownload.ok ? (
                             <>
                               <div className="text-[11px] text-gray-400">
-                                mode <span className="font-mono">{exportDownload.json.mode}</span> · {exportDownload.json.resources?.length || 0} resource(s) parsed
+                                {sandboxResponseLabel('Optum', exportDownload.json.mode)} · {exportDownload.json.resources?.length || 0} resource(s) parsed
                               </div>
                               <div className="mt-1 space-y-0.5">
                                 {(exportDownload.json.resources || []).slice(0, 5).map((r, i) => (
@@ -505,6 +507,7 @@ export default function ProviderAccessPanel() {
 
                 {expandedPatient === p.patientId && (
                   <div className="border-t border-gray-700 p-3 space-y-1.5">
+                    <DrugPriorAuths eobs={p.priorAuthorizations} />
                     <div className="text-xs text-gray-400 uppercase tracking-wide mb-2">Activity log</div>
                     {p.events.map((ev, i) => (
                       <div key={i} className="text-xs flex gap-2">

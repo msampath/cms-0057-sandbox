@@ -104,7 +104,7 @@ export async function POST(request) {
     answers,
     decision,
     track: 'pharmacy',
-    trackData: { ndc: drug.siteOfCare.self.ndc, pbm, caseId, determination: decision.determination }
+    trackData: { ndc: drug.siteOfCare.self.ndc, pbm, caseId, determination: decision.determination, reasonKey: decision.reasonKey }
   });
 
   logTransaction('Prime Therapeutics', `NCPDP PA RESPONSE (${decision.determination.toUpperCase()})`, {

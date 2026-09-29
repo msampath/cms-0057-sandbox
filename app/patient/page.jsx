@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiUrl } from '@/lib/basePath';
 import { PATIENT_LIST } from '@/lib/patients';
 import { authedFetch, getDemoToken, decodeJwtPayload } from '@/lib/smartClient';
+import DrugPriorAuths from '@/app/components/DrugPriorAuths';
 
 const PATIENT_SCOPES = [
   'patient/Patient.read',
@@ -107,6 +108,7 @@ export default function PatientAccess() {
           {/* Right column: EOB claims + PA history */}
           <div className="lg:col-span-2 space-y-6">
             <EobCard eobs={data.eobs} />
+            <DrugPriorAuths eobs={data.priorAuthorizations} />
             <PAHistory events={data.events} />
           </div>
         </div>

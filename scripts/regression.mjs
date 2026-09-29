@@ -321,8 +321,82 @@ async function phase3() {
   check('Medicaid: no grid rule matches (no Medicaid grid ingested)', /not on the active PA grid/i.test(medHook.json?.cards?.[0]?.summary || ''), medHook.json?.cards?.[0]?.summary);
 }
 
+const PDEX_PA = 'http://hl7.org/fhir/us/davinci-pdex/StructureDefinition/pdex-priorauthorization';
+const PDEX_REVIEW_ACTION = 'http://hl7.org/fhir/us/davinci-pdex/StructureDefinition/extension-reviewAction';
+
+function pdexReview(eob) {
+  for (const adj of eob?.item?.[0]?.adjudication || []) {
+    const ext = (adj.extension || []).find((e) => e.url === PDEX_REVIEW_ACTION);
+    if (!ext) continue;
+    const sub = (u) => ext.extension.find((e) => e.url.endsWith(u));
+    return {
+      action: sub('extension-reviewActionCode')?.valueCodeableConcept?.coding?.[0]?.code,
+      reason: sub('reasonCode')?.valueCodeableConcept?.coding?.[0]?.code,
+      category: adj.category?.coding?.[0]?.code
+    };
+  }
+  return null;
+}
+
+async function phase4() {
+  console.log('\nPhase 4: drug PA in the access APIs and at the pharmacy');
+  const pid = 'pat-6614-marcus-johnson';
+  const deny = { diagnosis: 'M05.79', 'conventional-therapy-failed': false, 'tb-screen-negative': true };
+  const med = drugPasBundle(pid, deny);
+  await post('/api/pas/submit', med);
+  const ben = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: pid, prescriberNpi: '1234567890' })).json;
+  await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: pid, prescriberNpi: '1234567890', caseId: ben?.caseId, answers: deny });
+
+  const pTok = await token(['patient/Patient.read', 'patient/Coverage.read', 'patient/ExplanationOfBenefit.read', 'patient/ClaimResponse.read']);
+  const pa = (await call('/api/patient-access?patientId=' + pid, { headers: { authorization: 'Bearer ' + pTok } })).json;
+  const eobs = pa?.priorAuthorizations || [];
+  const medEob = eobs.find((e) => e.type?.coding?.[0]?.code === 'professional');
+  const rxEob = eobs.find((e) => e.type?.coding?.[0]?.code === 'pharmacy');
+  check('Patient Access returns drug PAs from both tracks', !!medEob && !!rxEob, String(eobs.length));
+  check('medical drug PA EOB claims the PDex PA profile; pharmacy (NDC) EOB does not', medEob?.meta?.profile?.[0] === PDEX_PA && !rxEob?.meta?.profile && eobs.every((e) => e.use === 'preauthorization'));
+  const denialReason = medEob?.item?.[0]?.adjudication?.find((a) => a.category?.coding?.[0]?.code === 'denialreason')?.reason?.coding?.[0];
+  check('denialreason slice uses a CARC code (required binding), 886 stays in reviewAction', denialReason?.system === 'https://x12.org/codes/claim-adjustment-reason-codes' && denialReason?.code === '50');
+  check('medical EOB: HCPCS J0717, A3, 886 code 44, denialreason slice',
+    medEob?.item?.[0]?.productOrService?.coding?.[0]?.code === 'J0717' && pdexReview(medEob)?.action === 'A3' && pdexReview(medEob)?.reason === '44' && pdexReview(medEob)?.category === 'denialreason');
+  check('pharmacy EOB: NDC 50474075010, same reason 44',
+    rxEob?.item?.[0]?.productOrService?.coding?.[0]?.code === '50474075010' && pdexReview(rxEob)?.reason === '44');
+  check('drug PA EOB carries required elements (insurance, provider, created, quantity)',
+    eobs.every((e) => e.insurance?.[0]?.coverage?.reference && e.provider?.reference && e.created && e.item?.[0]?.quantity?.value));
+
+  const sTok = await token(['system/Patient.read', 'system/ExplanationOfBenefit.read', 'system/ClaimResponse.read', 'system/Coverage.read']);
+  const prov = (await call('/api/provider-access?npi=1234567890', { headers: { authorization: 'Bearer ' + sTok } })).json;
+  const marcus = prov?.patients?.find((p) => p.patientId === pid);
+  check('Provider Access returns the same drug PAs for the attributed patient', (marcus?.priorAuthorizations || []).some((e) => pdexReview(e)?.reason === '44'));
+
+  // A forced debug denial is not a model decision and stays out of the access APIs.
+  const forced = { ...drugPasBundle('pat-3301-dorothy-hayes', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true }), _simulateDenial: true };
+  await post('/api/pas/submit', forced);
+  const dorRec = (await call('/api/drug-pa/record?patientId=pat-3301-dorothy-hayes&drugKey=certolizumab')).json?.record;
+  // A genuine pharmacy approval for the same patient, which must appear.
+  await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-3301-dorothy-hayes', answers: { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true } });
+  const dor = (await call('/api/patient-access?patientId=pat-3301-dorothy-hayes', { headers: { authorization: 'Bearer ' + pTok } })).json;
+  const dorEobs = dor?.priorAuthorizations || [];
+  check('forced debug denial is recorded but excluded; the genuine approval is included',
+    dorRec?.tracks?.medical?.debugForced === true && dorEobs.some((e) => pdexReview(e)?.action === 'A1') && !dorEobs.some((e) => pdexReview(e)?.action === 'A3'));
+
+  const phNoTok = await call('/api/pharmacy/pa-status?memberId=BCBSIL-MEM-614&ndc=50474075010');
+  check('pharmacy lookup without token → 401', phNoTok.status === 401);
+  const ph = await call('/api/pharmacy/pa-status?memberId=BCBSIL-MEM-614&ndc=50474075010', { headers: { authorization: 'Bearer ' + sTok } });
+  const phEobs = (ph.json?.bundle?.entry || []).map((e) => e.resource);
+  check('pharmacy lookup returns both tracks with reason 44', ph.status === 200 && phEobs.length === 2 && phEobs.every((e) => pdexReview(e)?.reason === '44'));
+  check('pharmacy lookup carries RTPB and F&B', ph.json?.benefit?.rtpb?.priorAuthorizationRequired === true && /formulary/i.test(ph.json?.benefit?.formulary?.formularyStatus || ''));
+  const phBad = await call('/api/pharmacy/pa-status?memberId=BCBSIL-MEM-614&ndc=00000000000', { headers: { authorization: 'Bearer ' + sTok } });
+  check('pharmacy lookup: unknown NDC → 404 OperationOutcome (error)', phBad.status === 404 && phBad.json?.issue?.[0]?.severity === 'error');
+  const phMissing = await call('/api/pharmacy/pa-status?memberId=BCBSIL-MEM-614', { headers: { authorization: 'Bearer ' + sTok } });
+  check('pharmacy lookup: missing ndc → 400 OperationOutcome', phMissing.status === 400 && phMissing.json?.resourceType === 'OperationOutcome');
+
+  const hist = (await call('/api/payer-to-payer/history/pat-8849-jane-doe', { headers: { authorization: 'Bearer ' + sTok } })).json;
+  const priorDrug = (hist?.entry || []).map((e) => e.resource).find((r) => r.resourceType === 'ExplanationOfBenefit' && r.use === 'preauthorization');
+  check('Payer-to-Payer history carries a prior-plan pharmacy drug PA (use preauthorization, NDC, A1)', priorDrug?.item?.[0]?.productOrService?.coding?.[0]?.code === '50474075010' && pdexReview(priorDrug)?.action === 'A1' && pdexReview(priorDrug)?.category === 'allowedunits');
+}
+
 // Phase checks are appended below as each phase lands.
-const PHASES = [baseline, phase1, phase2, phase3];
+const PHASES = [baseline, phase1, phase2, phase3, phase4];
 
 console.log(`Regression against ${BASE}`);
 for (const phase of PHASES) await phase();

@@ -16,7 +16,17 @@ const BASE = (process.env.BASE_URL || 'http://localhost:3000/cms-0057').replace(
 // exercise client fetches, so a fetch that skipped apiUrl() 404s here.
 const STEPS = [
   { path: '/', expect: ['156.223', '156.222(a)', '156.222(b)', '156.221(a)'] },
-  { path: '/ehr', click: ['Sign Order'], expect: ['Prior authorization required', 'Launch DTR'] },
+  {
+    path: '/ehr',
+    click: ['Sign Order'],
+    // Against a server with no Optum or Availity credentials (the default
+    // locally) both panels must say they show a saved copy. Set
+    // SMOKE_LIVE_INTEGRATIONS=1 when running against a live-credential server.
+    expect: process.env.SMOKE_LIVE_INTEGRATIONS
+      ? ['Prior authorization required', 'Launch DTR', 'Optum sandbox response', 'Availity sandbox response']
+      : ['Prior authorization required', 'Launch DTR', 'Optum sandbox response (saved copy)', 'Availity sandbox response (saved copy)'],
+    expectAbsent: ['Optum Real', 'real CRD engine']
+  },
   {
     path: '/ehr',
     selectOrder: 'self-administered syringe',
@@ -54,6 +64,9 @@ const STEPS = [
     click: ['David Kim', 'Sign Order'],
     expect: ['72 hours', 'proposed, not yet in effect', 'FFE issuer exception', '2028-06-30']
   },
+  // Jane Doe has drug PAs from the /ehr drug steps above.
+  { path: '/patient', name: 'drug PAs', click: ['Jane Doe'], expect: ['Drug prior authorizations', 'Profile: PDex Prior Authorization', 'X12 886 44'] },
+  { path: '/pharmacy', click: ['Look up PA status'], expect: ['PA status for Certolizumab', 'X12 886 44', 'RTPB', 'F&B formulary'] },
   { path: '/patient', name: 'Medicaid member', click: ['Maria Santos'], expect: ['156.221(a)', 'Blue Cross Community Health Plans'] },
   { path: '/patient', name: 'FFE QHP member', click: ['David Kim'], expect: ['Individual market QHP on an FFE (illustrative)'] },
   { path: '/um', tab: 'Rules & Schema', expect: ['Payer Interop Gateway'] },
@@ -64,8 +77,14 @@ const STEPS = [
     click: ['Show FHIR ↔ X12 translation', 'Show NCPDP messages'],
     expect: ['FHIR PAS, proposed HIPAA standard', '162.1302', 'X12 278 — parallel projection', '<Message version="2023011">', 'not certified NCPDP payloads', 'Decision clock:', '24 hours', '1927(d)(5)(A)']
   },
-  { path: '/um', tab: 'Provider Access', click: ['Retrieve panel'], expect: ['156.222(a)', 'pat-8849-jane-doe'] },
-  { path: '/um', tab: 'P2P Exchange', click: ['Request prior plan data'], expect: ['156.222(b)', 'Step 3', 'DENIED'] },
+  {
+    path: '/um',
+    tab: 'Provider Access',
+    click: ['Retrieve panel', 'Jane Doe'],
+    expect: ['156.222(a)', 'pat-8849-jane-doe', 'Drug prior authorizations'],
+    expectAbsent: ['Optum real', 'reached a real implementation']
+  },
+  { path: '/um', tab: 'P2P Exchange', click: ['Request prior plan data'], expect: ['156.222(b)', 'Step 3', 'DENIED', 'Prior plan drug prior authorizations', '50474075010'] },
   { path: '/um', tab: 'Standards', expect: ['Sunset marker', '2.2.1', 'January 1, 2028'] }
 ];
 
@@ -153,6 +172,9 @@ for (const step of STEPS) {
     // innerText reflects CSS text-transform, so compare case-insensitively.
     const haystack = text.toLowerCase();
     const missing = step.expect.filter((t) => !haystack.includes(t.toLowerCase()));
+    for (const t of step.expectAbsent || []) {
+      if (haystack.includes(t.toLowerCase())) errors.push(`unexpected text: ${t}`);
+    }
     if (missing.length || errors.length) {
       failures++;
       console.log(`  FAIL  ${label}${missing.length ? ` -- missing: ${missing.join(', ')}` : ''}${errors.length ? ` -- console: ${errors.join(' | ')}` : ''}`);

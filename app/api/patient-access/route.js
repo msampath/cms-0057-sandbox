@@ -3,6 +3,7 @@ import { getLog } from '@/lib/db';
 import { getPatient, PAYER_NAME, BENEFIT_YEAR } from '@/lib/patients';
 import { buildEob, CARIN_PROFILES, US_CORE_PROFILES } from '@/lib/eob';
 import { requireScopes, AUTH_ENABLED } from '@/lib/auth';
+import { drugPriorAuthEobs } from '@/lib/drugPaAccess';
 
 // SMART on FHIR v2 patient-launch scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -45,7 +46,7 @@ export async function GET(request) {
 
   // Resources are shaped to US Core (Patient) and CARIN BB (Coverage, EOB).
   // The envelope around them ({ smartScopes, patient, coverage, eobs,
-  // events }) is a demo convenience: the events feed comes from the
+  // priorAuthorizations, events }) is a demo convenience: the events feed comes from the
   // transaction log and has no natural FHIR resource in this simulator.
   const eobs = (meta.currentPlanEobSummary || []).map((row, i) =>
     buildEob({
@@ -111,6 +112,9 @@ export async function GET(request) {
       period: { start: `${BENEFIT_YEAR}-01-01`, end: `${BENEFIT_YEAR}-12-31` },
     },
     eobs,
+    // Drug PAs as PDex Prior Authorization EOBs (CMS-0062-P removes the
+    // CMS-0057-F drug exclusion from Patient Access).
+    priorAuthorizations: drugPriorAuthEobs(patientId),
     events,
   });
 }

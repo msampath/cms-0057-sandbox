@@ -115,6 +115,14 @@ export default function Landing() {
           </div>
         </div>
 
+        <div className="text-sm text-slate-300 mb-8">
+          CMS-0062-P (proposed) adds a fourth surface:{' '}
+          <Link href="/pharmacy" className="text-teal-300 hover:text-teal-200 underline">
+            Pharmacy PA lookup
+          </Link>
+          , where a dispensing pharmacy reads drug PA status, benefit, and formulary data over a SMART-scoped FHIR read.
+        </div>
+
         {/* Start-here path */}
         <div className="mb-8">
           <div className="text-xs uppercase tracking-widest text-slate-400 mb-3">

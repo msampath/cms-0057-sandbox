@@ -7,6 +7,7 @@ import PharmacyEpa, { SharedRecord } from './pharmacyEpa';
 import ClockBadge from '@/app/components/ClockBadge';
 import { decisionClock } from '@/lib/decisionClock';
 import { DRUG_BY_HCPCS } from '@/lib/drugPa';
+import { sandboxResponseLabel, isSavedCopy } from '@/lib/integrationLabel';
 import {
   getLaunchedSession,
   fetchLaunchedPatient,
@@ -1618,15 +1619,14 @@ export default function EhrDashboard() {
       {(optumOrderSignLoading || optumOrderSign) && (
         <div className="bg-violet-50 border-2 border-violet-600 text-violet-900 px-6 py-4 rounded-lg shadow-sm mb-6 max-w-3xl">
           <div className="text-xs uppercase tracking-widest text-violet-700 mb-1">
-            Optum Real Prior Authorization (second CRD opinion)
+            {sandboxResponseLabel('Optum', optumOrderSign?.json?.mode)} · second CRD opinion
           </div>
           {optumOrderSignLoading && !optumOrderSign ? (
-            <div className="text-sm">Checking with UnitedHealthcare&rsquo;s real CRD engine...</div>
+            <div className="text-sm">Loading the Optum sandbox CRD response...</div>
           ) : optumOrderSign?.ok ? (
             <>
               <div className="text-sm">
-                {optumOrderSign.json?.cards?.cards?.length || 0} card(s) returned · Mode:{' '}
-                <code className="bg-white px-1 rounded">{optumOrderSign.json?.mode}</code>
+                {optumOrderSign.json?.cards?.cards?.length || 0} card(s) returned
               </div>
               <div className="mt-2 space-y-1.5">
                 {(optumOrderSign.json?.cards?.cards || []).map((c, i) => (
@@ -1659,7 +1659,7 @@ export default function EhrDashboard() {
       {(availityLoading || availityResult) && (
         <div className="bg-sky-50 border-2 border-sky-600 text-sky-900 px-6 py-4 rounded-lg shadow-sm mb-6 max-w-3xl">
           <div className="text-xs uppercase tracking-widest text-sky-700 mb-1">
-            Availity coverage check (X12 270/271 eligibility)
+            {sandboxResponseLabel('Availity', availityResult?.json?.mode)} · coverage check (X12 270/271 eligibility)
           </div>
           {availityLoading && !availityResult ? (
             <div className="text-sm">Checking eligibility with Availity&hellip;</div>
@@ -1681,14 +1681,12 @@ export default function EhrDashboard() {
                     · Member:{' '}
                     <code className="bg-white px-1 rounded">
                       {first?.subscriber?.memberId || '—'}
-                    </code>{' '}
-                    · Mode:{' '}
-                    <code className="bg-white px-1 rounded">{availityResult.json?.mode}</code>
+                    </code>
                   </div>
-                  {availityResult.json?.response?._mock && (
+                  {isSavedCopy(availityResult.json?.mode) && (
                     <div className="text-xs mt-2 text-sky-800 bg-sky-100 px-2 py-1 rounded">
-                      Mock response. Set AVAILITY_CLIENT_ID and AVAILITY_CLIENT_SECRET on
-                      Cloud Run to route to the real Availity Coverages API.
+                      Saved copy: no call was made. Set AVAILITY_CLIENT_ID and AVAILITY_CLIENT_SECRET
+                      to call Availity&rsquo;s sandbox.
                     </div>
                   )}
                   <details className="mt-2 text-xs">
@@ -1854,10 +1852,10 @@ export default function EhrDashboard() {
       {showDtr && (optumQuestionnaireLoading || optumQuestionnaire) && (
         <div className="bg-violet-50 border-2 border-violet-600 text-violet-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
           <div className="text-xs uppercase tracking-widest text-violet-700 mb-1">
-            Optum Real DTR (reference questionnaire, informational only)
+            {sandboxResponseLabel('Optum', optumQuestionnaire?.json?.mode)} · reference DTR questionnaire, informational only
           </div>
           {optumQuestionnaireLoading && !optumQuestionnaire ? (
-            <div className="text-sm">Retrieving a real DTR questionnaire package from Optum...</div>
+            <div className="text-sm">Loading the Optum sandbox DTR questionnaire package...</div>
           ) : optumQuestionnaire?.ok ? (
             (() => {
               const q =
@@ -1866,8 +1864,7 @@ export default function EhrDashboard() {
                 <>
                   <div className="text-sm font-bold">{q?.title || 'Questionnaire retrieved'}</div>
                   <div className="text-xs mt-1 text-violet-700">
-                    Mode: <code className="bg-white px-1 rounded">{optumQuestionnaire.json?.mode}</code>
-                    {q?.publisher && <> · Publisher: {q.publisher}</>}
+                    {q?.publisher && <>Publisher: {q.publisher}</>}
                   </div>
                   {q?.description && (
                     <div className="text-xs mt-2 text-violet-800">{q.description}</div>
@@ -2001,10 +1998,10 @@ export default function EhrDashboard() {
       {(optumPasLoading || optumPasResult) && (
         <div className="bg-violet-50 border-2 border-violet-600 text-violet-900 px-6 py-4 rounded-lg shadow-sm mt-4 max-w-3xl">
           <div className="text-xs uppercase tracking-widest text-violet-700 mb-1">
-            Optum Real Prior Authorization (parallel PAS path)
+            {sandboxResponseLabel('Optum', optumPasResult?.json?.mode)} · parallel PAS path
           </div>
           {optumPasLoading && !optumPasResult ? (
-            <div className="text-sm">Submitting to Optum&rsquo;s real Claim/$submit endpoint...</div>
+            <div className="text-sm">Loading the Optum sandbox Claim/$submit response...</div>
           ) : optumPasResult?.ok ? (
             (() => {
               const cr = optumPasResult.json?.response?.entry?.[0]?.resource;
@@ -2014,13 +2011,12 @@ export default function EhrDashboard() {
                     {cr?.outcome === 'queued' ? '⏳' : '✓'} {cr?.disposition || cr?.outcome || 'Response received'}
                   </div>
                   <div className="text-sm mt-1">
-                    Outcome: <code className="bg-white px-1 rounded">{cr?.outcome || '—'}</code> · Mode:{' '}
-                    <code className="bg-white px-1 rounded">{optumPasResult.json?.mode}</code>
+                    Outcome: <code className="bg-white px-1 rounded">{cr?.outcome || '—'}</code>
                   </div>
                   <div className="text-xs mt-2 text-violet-800 bg-violet-100 px-2 py-1 rounded">
-                    From a real, independent UnitedHealthcare-shaped Da Vinci PAS implementation —
-                    a genuine second opinion on the same Bundle, not just a projection of this
-                    sandbox&rsquo;s own decision.
+                    {isSavedCopy(optumPasResult.json?.mode)
+                      ? 'Saved copy of an Optum sandbox response. No call was made for this Bundle.'
+                      : 'From Optum\u2019s sandbox, an independent implementation of the same Da Vinci PAS operation, run on the same Bundle.'}
                   </div>
                   <details className="mt-2 text-xs">
                     <summary className="cursor-pointer text-violet-700">Show request/response JSON</summary>

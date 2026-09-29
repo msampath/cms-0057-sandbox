@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getLog } from '@/lib/db';
 import { getPatient } from '@/lib/patients';
 import { requireScopes, AUTH_ENABLED } from '@/lib/auth';
+import { drugPriorAuthEobs } from '@/lib/drugPaAccess';
 
 // SMART on FHIR v2 scopes that a production endpoint would require.
 const REQUIRED_SCOPES = [
@@ -56,6 +57,9 @@ export async function GET(request) {
     ...p,
     lastActivity: p.events[0]?.timestamp || null,
     eventCount: p.events.length,
+    // Drug PAs as PDex Prior Authorization EOBs (CMS-0062-P removes the
+    // CMS-0057-F drug exclusion from Provider Access).
+    priorAuthorizations: drugPriorAuthEobs(p.patientId),
   }));
 
   return NextResponse.json({

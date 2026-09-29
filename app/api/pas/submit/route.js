@@ -189,6 +189,7 @@ export async function POST(request) {
         vendor,
         authNumber,
         determination: forced ? 'denied' : drugDecision.determination,
+        reasonKey: forced ? null : drugDecision.reasonKey,
         ...(forced ? { debugForced: true } : {}),
         ...(!forced && !hasAnswers ? { noAnswers: true } : {})
       }

@@ -4,6 +4,7 @@ import { apiUrl } from '@/lib/basePath';
 import { PATIENT_LIST, PAYER_NAME, PRIOR_PLAN_HISTORY } from '@/lib/patients';
 import { authedFetch } from '@/lib/smartClient';
 import { readReviewAction } from '@/lib/fhir';
+import DrugPriorAuths from '@/app/components/DrugPriorAuths';
 
 // System scopes the requesting payer presents to the prior payer — the
 // union of what member-match and the history endpoint require.
@@ -191,7 +192,10 @@ function HistoryStep({ bundle }) {
   const resources = (bundle.entry || []).map((e) => e.resource).filter(Boolean);
   const coverage = resources.find((r) => r.resourceType === 'Coverage');
   const priorPas = resources.filter((r) => r.resourceType === 'ClaimResponse');
-  const eobs = resources.filter((r) => r.resourceType === 'ExplanationOfBenefit');
+  // EOBs with use preauthorization are PDex Prior Authorization EOBs (drug
+  // PAs); the rest are CARIN BB claims.
+  const eobs = resources.filter((r) => r.resourceType === 'ExplanationOfBenefit' && r.use !== 'preauthorization');
+  const drugPaEobs = resources.filter((r) => r.resourceType === 'ExplanationOfBenefit' && r.use === 'preauthorization');
 
   const planClass = coverage?.class?.[0];
   const totalBy = (eob, code) =>
@@ -252,6 +256,8 @@ function HistoryStep({ bundle }) {
             </div>
           );
         })}
+
+        <DrugPriorAuths eobs={drugPaEobs} title="Prior plan drug prior authorizations" />
 
         <div className="text-xs uppercase tracking-wide text-gray-400 mt-3 mb-1">
           Claims (ExplanationOfBenefit, CARIN BB)
