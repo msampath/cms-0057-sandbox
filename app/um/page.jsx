@@ -56,6 +56,14 @@ export default function UmDashboard() {
     e.preventDefault();
     if (files.length === 0) return;
     setIsProcessing(true);
+    try {
+      await runExtraction();
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const runExtraction = async () => {
 
     // Real per-file extraction via the Python-backed /api/extract endpoint.
     // Each file is POSTed as multipart; the server spawns pdfplumber, parses
@@ -106,7 +114,7 @@ export default function UmDashboard() {
         (r) => `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`
       )
     );
-    const newCount = rules.reduce(
+    const newCount = rules.filter((r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || ''))).reduce(
       (n, r) =>
         activeKeys.has(`${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`)
           ? n
@@ -132,7 +140,6 @@ export default function UmDashboard() {
       diff: { newCount, alreadyPresent: rules.length - newCount, activeBefore: activeKeys.size },
       extractionErrors: errors
     });
-    setIsProcessing(false);
   };
 
   // Discard staging and return to the upload form. Files remain queued so
@@ -155,6 +162,8 @@ export default function UmDashboard() {
       return;
     }
     setCommitting(false);
+    const dropped = staging.rules.length - toCommit.length;
+    if (dropped > 0) window.alert(`Committed. ${dropped} code rule${dropped === 1 ? '' : 's'} without a CPT or HCPCS shaped code were left out.`);
     mutateKey(apiUrl('/api/rules'));
     setStaging(null);
     setFiles([]);
@@ -178,7 +187,7 @@ export default function UmDashboard() {
             Rules &amp; Schema
           </button>
           <button
-            onClick={() => setTab('feed')}
+            onClick={() => { setTab('feed'); mutateKey(apiUrl('/api/logs')); }}
             className={`px-3 py-1.5 rounded text-sm ${tab === 'feed' ? 'bg-blue-700 text-white font-semibold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
           >
             Live Traffic Feed {data?.logs && <span className="text-gray-500 text-xs">({data.logs.length})</span>}
@@ -209,7 +218,7 @@ export default function UmDashboard() {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <ResetDemoButton />
+          <ResetDemoButton onReset={() => setStaging(null)} />
           <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded">SYSTEM: ONLINE</span>
         </div>
       </div>
@@ -254,7 +263,7 @@ export default function UmDashboard() {
               rules against the {ruleCount} already in active CRD memory.
             </p>
             <PreIngestedButton ruleCount={ruleCount} />
-            <EmptyStateResetLink />
+            <EmptyStateResetLink onReset={() => setStaging(null)} />
           </div>
         )}
 
@@ -381,7 +390,7 @@ export default function UmDashboard() {
   );
 }
 
-function ResetDemoButton() {
+function ResetDemoButton({ onReset }) {
   const [busy, setBusy] = useState(false);
   const reset = async () => {
     if (
@@ -395,6 +404,7 @@ function ResetDemoButton() {
     try {
       const res = await fetch(apiUrl('/api/demo/reset?mode=seeded'), { method: 'POST' }).catch(() => null);
       if (!res?.ok) window.alert(`Reset failed: ${res ? `HTTP ${res.status}` : 'network error'}.`);
+      else onReset?.();
       mutateKey(apiUrl('/api/rules'));
       mutateKey(apiUrl('/api/logs'));
     } finally {
@@ -414,7 +424,7 @@ function ResetDemoButton() {
   );
 }
 
-function EmptyStateResetLink() {
+function EmptyStateResetLink({ onReset }) {
   const [busy, setBusy] = useState(false);
   const resetEmpty = async () => {
     if (
@@ -428,6 +438,7 @@ function EmptyStateResetLink() {
     try {
       const res = await fetch(apiUrl('/api/demo/reset?mode=empty'), { method: 'POST' }).catch(() => null);
       if (!res?.ok) window.alert(`Reset failed: ${res ? `HTTP ${res.status}` : 'network error'}.`);
+      else onReset?.();
       mutateKey(apiUrl('/api/rules'));
       mutateKey(apiUrl('/api/logs'));
     } finally {
@@ -522,9 +533,12 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extra
           type="file"
           multiple
           disabled={!extractorAvailable}
-          onChange={(e) =>
+          onChange={(e) => {
+            const picked = Array.from(e.target.files || []);
+            // Cleared so the same file can be picked again after removal.
+            e.target.value = '';
             setFiles((prev) => {
-              const incoming = Array.from(e.target.files || []);
+              const incoming = picked;
               const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
               const merged = [...prev];
               for (const f of incoming) {
@@ -535,8 +549,8 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extra
                 }
               }
               return merged;
-            })
-          }
+            });
+          }}
           className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-gray-700 file:text-gray-200"
           accept=".pdf,.csv"
         />

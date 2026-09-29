@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { outboundRateLimit } from '@/lib/rateLimit';
 import { submitClaim, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
@@ -18,6 +19,8 @@ export const dynamic = 'force-dynamic';
  * CMS-0057-F mandate.
  */
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 1024 * 1024);
+  if (oversized) return oversized;
   const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let bundle;

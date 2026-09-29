@@ -166,7 +166,7 @@ page.on('request', (req) => {
   try { b = req.postDataJSON(); } catch { errors.push('PAS request body is not JSON'); return; }
   const res = (t) => (b?.entry || []).map((e) => e.resource).find((r) => r?.resourceType === t);
   const claim = res('Claim');
-  const missing = ['type', 'created', 'provider', 'insurer', 'insurance', 'priority'].filter((k) => !claim?.[k]);
+  const missing = ['type', 'created', 'provider', 'insurer', 'insurance', 'priority'].filter((k) => !claim?.[k] || (Array.isArray(claim[k]) && !claim[k].length));
   if (missing.length) errors.push(`PAS Claim is missing ${missing.join(', ')}`);
   if (res('Patient')?.condition) errors.push('PAS Patient carries condition, which R4 does not define');
 });

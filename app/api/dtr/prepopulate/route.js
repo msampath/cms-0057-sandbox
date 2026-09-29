@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { outboundRateLimit } from '@/lib/rateLimit';
 import { fetchEpicPatientBundle, epicBackendMode } from '@/lib/epicBackend';
 import { evaluateCqlLibrary, listCqlLibraries } from '@/lib/cql';
@@ -26,6 +27,8 @@ export const dynamic = 'force-dynamic';
  * linkIds and marks the prefilled fields.
  */
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 64 * 1024);
+  if (oversized) return oversized;
   const limited = outboundRateLimit('Epic', epicBackendMode());
   if (limited) return limited;
   let body = {};

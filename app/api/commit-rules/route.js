@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { getDb, saveDb, logTransaction } from '@/lib/db';
 
 const keyOf = (r) =>
@@ -70,6 +71,8 @@ function normalizeRule(r) {
 }
 
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 16 * 1024 * 1024);
+  if (oversized) return oversized;
   let body;
   try {
     body = await request.json();

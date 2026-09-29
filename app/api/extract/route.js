@@ -24,7 +24,7 @@ import { runPython } from '@/lib/python';
  */
 
 const KIND_MATCHERS = [
-  { re: /\bbh\b|behavioral|mental.health/i,                    kind: 'bh',      label: 'Behavioral Health' },
+  { re: /(^|[-_ .])bh([-_ .]|$)|behavioral|mental.health/i,                    kind: 'bh',      label: 'Behavioral Health' },
   { re: /specialty.*pharm|pharmacy|\bspecialty\b/i,            kind: 'pharm',   label: 'Specialty Pharmacy' },
   { re: /\bmapa\b|medicare.?advantage|\bma[-_ ]|[-_ ]ma\b/i,   kind: 'ma',      label: 'Medicare Advantage' },
   { re: /commercial.*med.*surg|med.*surg|commercial/i,         kind: 'medsurg', label: 'Commercial Med-Surg' }
@@ -80,7 +80,7 @@ async function extract(form) {
 
   // Only the base name is used, to pick the grid kind and label the rules.
   // The file itself is written under a fixed name.
-  const filename = path.basename(String(file.name || 'upload.pdf'));
+  const filename = path.basename(String(file.name || 'upload.pdf')).slice(0, 255);
   if (file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json({ error: `file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, { status: 413 });
   }

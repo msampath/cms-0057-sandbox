@@ -448,6 +448,8 @@ export default function EhrDashboard() {
   const selfSignAtRef = useRef(0);
   // The pend currently shown, read by async handlers after an await.
   const pendedIdRef = useRef(null);
+  // Bumped per PAS submit, so a slower Optum reply from an earlier submit is dropped.
+  const optumPasReqRef = useRef(0);
   pendedIdRef.current = pendedId;
   // Route PAS through the simulated clearinghouse (conformance check), and
   // optionally claim an unsupported PAS version to see it rejected.
@@ -786,6 +788,12 @@ export default function EhrDashboard() {
     setSmartContext(null);
     setOptumOrderSign(null);
     setAvailityResult(null);
+    // The previous submission's panels do not belong to the new signing.
+    optumPasReqRef.current += 1;
+    setOptumPasResult(null);
+    setOptumPasLoading(false);
+    setPasSentAt(null);
+    setCdexTask(null);
     // DTR CQL prepop is tied to a specific questionnaire + order. All
     // questionnaires reuse generic sequential linkIds ("1", "2", "3")
     // for different question text, so leaving stale prepopFilledLinks
@@ -1090,6 +1098,7 @@ export default function EhrDashboard() {
     setAttachmentResult(null);
     // Optum's second opinion runs on its own, so a slow upstream does not
     // hold this payer's decision.
+    const myOptumReq = ++optumPasReqRef.current;
     fetch(apiUrl('/api/optum/pas-submit'), {
       method: 'POST',
       body: JSON.stringify(bundle)
@@ -1097,7 +1106,7 @@ export default function EhrDashboard() {
       .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
       .catch((e) => ({ ok: false, status: 0, json: { error: e.message } }))
       .then((v) => {
-        if (!stillCurrent()) return;
+        if (!stillCurrent() || optumPasReqRef.current !== myOptumReq) return;
         setOptumPasResult(v);
         setOptumPasLoading(false);
       });
@@ -1537,6 +1546,7 @@ export default function EhrDashboard() {
           <input
             type="text"
             value={customCode}
+            maxLength={64}
             onChange={(e) => { invalidateOrderContext(); setCustomCode(e.target.value); }}
             placeholder="e.g. 27447, J9145, 99213"
             className="border border-gray-300 p-2 rounded flex-1 text-gray-800 font-mono"
@@ -2057,7 +2067,7 @@ export default function EhrDashboard() {
                       if (scenarioVersionRef.current !== myVersion || pendedIdRef.current !== forPend) return;
                       setAttachmentResult({ ok: res.ok, text: json?.issue?.[0]?.diagnostics || `HTTP ${res.status}` });
                     } catch (e) {
-                      if (scenarioVersionRef.current === myVersion) setAttachmentResult({ ok: false, text: e.message || 'network error' });
+                      if (scenarioVersionRef.current === myVersion && pendedIdRef.current === forPend) setAttachmentResult({ ok: false, text: e.message || 'network error' });
                     } finally {
                       setAttachmentSending(false);
                     }

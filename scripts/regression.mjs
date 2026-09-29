@@ -257,19 +257,22 @@ async function phase2() {
   const rec2 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
   check('shared record approved on both tracks', rec2?.tracks?.medical?.determination === 'approved' && rec2?.tracks?.pharmacy?.determination === 'approved');
 
-  // A debug denial of a request the model approves is recorded as forced
-  // and leaves the shared determination and answers alone.
+  // A debug denial of a request the model approves is not a decision. It
+  // leaves the shared determination, the answers, and the track's earlier
+  // model decision alone, so the access APIs keep showing that decision.
   const forcedBundle = { ...drugPasBundle(pid2, ok), _simulateDenial: true };
   const forced = (await post('/api/pas/submit', forcedBundle)).json?.entry?.[0]?.resource;
   const rec3 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
-  check('debug denial returns A3 but is marked forced on the record', review(forced)?.action === 'A3' && rec3?.tracks?.medical?.debugForced === true && rec3?.determination === 'approved');
+  check('debug denial returns A3 but keeps the earlier model decision on the record',
+    review(forced)?.action === 'A3' && rec3?.tracks?.medical?.determination === 'approved' && !rec3?.tracks?.medical?.debugForced && rec3?.determination === 'approved');
   // A PAS Bundle with no QuestionnaireResponse must not wipe the answers.
   const noQr = drugPasBundle(pid2, {});
   noQr.entry = noQr.entry.filter((e) => e.resource.resourceType !== 'QuestionnaireResponse');
   await post('/api/pas/submit', noQr);
   const rec4 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
   check('empty answer set does not wipe stored answers', JSON.stringify(rec4?.answers) === JSON.stringify(ok), JSON.stringify(rec4?.answers));
-  check('empty answer set does not flip the shared determination', rec4?.determination === 'approved' && rec4?.tracks?.medical?.noAnswers === true, rec4?.determination);
+  check('empty answer set does not flip the shared determination or the track decision',
+    rec4?.determination === 'approved' && rec4?.tracks?.medical?.determination === 'approved' && !rec4?.tracks?.medical?.noAnswers, JSON.stringify(rec4?.tracks?.medical));
 
   // Second denial branch: TB screening missing → 886 code 0U on both tracks.
   const pid3 = `pat-reg-${Date.now()}-c`;
@@ -463,6 +466,13 @@ async function phase5() {
   await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', answers: {} });
   const mNo = (await metrics())?.priorAuthorization;
   check('drug requests with no answers are left out of the PA metrics', mNo?.drugs?.all?.requests === 0, JSON.stringify(mNo?.drugs?.all));
+  await post('/api/pas/submit', drugPasBundle('pat-8849-jane-doe', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true }));
+  const mMed = (await metrics())?.priorAuthorization?.drugs?.medicalBenefit;
+  check('an approved medical-benefit drug PA counts under drugs.medicalBenefit', mMed?.requests === 1 && mMed?.approved === 1, JSON.stringify(mMed));
+  // An answerless resubmit does not hide that decision from the access APIs.
+  await post('/api/pas/submit', noQr);
+  const kept = (await call('/api/drug-pa/record?patientId=pat-8849-jane-doe&drugKey=certolizumab')).json?.record?.tracks?.medical;
+  check('an answerless resubmit keeps the earlier model decision on the track', kept?.determination === 'approved' && !kept?.noAnswers, JSON.stringify(kept));
   await call('/api/demo/reset?mode=seeded', { method: 'POST' });
 
   const reg = await call('/api/registry/endpoints');
@@ -804,6 +814,57 @@ async function hardening() {
   const pasProfile = 'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/profile-pas-request-bundle';
   const mixed = { ...pasBundle('70553'), meta: { profile: [pasProfile, pasProfile + '|1.1.0'] } };
   check('clearinghouse checks every PAS profile claim (unversioned + 1.1.0 → 422)', (await post('/api/clearinghouse/pas', mixed)).status === 422);
+
+  console.log('\nSuper-review round 5: bounds and guards');
+  const chunked = await fetch(BASE + '/api/pas/submit', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{}')); c.close(); } }),
+    duplex: 'half'
+  });
+  check('a chunked body (no Content-Length) → 411', chunked.status === 411, String(chunked.status));
+  const chunkedRules = await fetch(BASE + '/api/commit-rules', {
+    method: 'POST',
+    body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('[]')); c.close(); } }),
+    duplex: 'half'
+  });
+  check('commit-rules refuses a chunked body too → 411', chunkedRules.status === 411, String(chunkedRules.status));
+  check('no-token POST with no body still gets 401 first', (await fetch(BASE + '/api/payer-to-payer/member-match', { method: 'POST' })).status === 401);
+  const manyItems = pasBundle('70553');
+  manyItems.entry[1].resource.item = Array.from({ length: 51 }, (_, i) => ({ sequence: i + 1, productOrService: { coding: [{ code: '70553' }] } }));
+  check('PAS with more than 50 Claim items → 400', (await post('/api/pas/submit', manyItems)).status === 400);
+  const noId = pasBundle('70553');
+  delete noId.entry[0].resource.id;
+  check('PAS Patient identified only by fullUrl (no id) is accepted', (await post('/api/pas/submit', noId)).status === 200);
+  const longName = pasBundle('77301');
+  longName.entry[0].resource.name = [{ family: 'F'.repeat(100), given: ['G'.repeat(100)] }];
+  await post('/api/pas/submit', longName);
+  const longX12 = String((await logsFor(/^X12 278 REQUEST$/))[0]?.details?.x12 || '');
+  check('X12 NM103 cut to 60 and NM104 to 35 characters', longX12.includes('NM1*IL*1*' + 'F'.repeat(60) + '*' + 'G'.repeat(35) + '*'));
+  check('X12 UM03 is 6 (Radiation Therapy) for 77301', longX12.includes('UM*HS*I*6~'));
+  check('Optum export download rejects a bad file name → 400', (await call('/api/optum/export/download/a%21b')).status === 400);
+  check('Optum kickoff rejects a bad group id in mock mode → 400', (await post('/api/optum/export/kickoff', { groupId: '..' })).status === 400);
+  const hmoHs = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h6', code: '99999', planType: 'COMM-HMO', practitionerNpi: '1234567890', patientId: 'pat-6614-marcus-johnson', patient: { id: 'pat-6614-marcus-johnson' }, 'hard-stop-trigger': true })).json;
+  check('hard stop wins over the plan default', /Order blocked/.test(hmoHs?.cards?.[0]?.summary || ''), hmoHs?.cards?.[0]?.summary);
+
+  // CDex: the requester must answer, and attachments per pend are bounded.
+  const cdPend = (await post('/api/pas/submit', pasBundle('15820', {}, 'MA-PPO'))).json?.entry?.[0]?.resource?.preAuthRef;
+  const wrongProv = attachmentParams(cdPend);
+  wrongProv.parameter = wrongProv.parameter.map((p) => (p.name === 'ProviderId' ? { name: 'ProviderId', valueIdentifier: { value: '9999999999' } } : p));
+  check('$submit-attachment from a different provider → 422', (await post('/api/cdex/$submit-attachment', wrongProv)).status === 422);
+  const orgOnly = attachmentParams(cdPend);
+  orgOnly.parameter = orgOnly.parameter.filter((p) => p.name !== 'ProviderId').concat([{ name: 'OrganizationId', valueIdentifier: { value: 'ORG-1' } }]);
+  check('$submit-attachment with only OrganizationId when the requester is known → 422', (await post('/api/cdex/$submit-attachment', orgOnly)).status === 422);
+  const many = attachmentParams(cdPend, { final: false });
+  const oneAtt = many.parameter.find((p) => p.name === 'Attachment');
+  many.parameter = many.parameter.filter((p) => p.name !== 'Attachment').concat(Array.from({ length: 21 }, () => oneAtt));
+  check('more than 20 attachments on one pend → 422', (await post('/api/cdex/$submit-attachment', many)).status === 422);
+
+  // Last: a reset forgets open ePA cases.
+  const preReset = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'pat-4410-david-kim' })).json?.caseId;
+  await call('/api/demo/reset?mode=seeded', { method: 'POST' });
+  const postReset = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-4410-david-kim', caseId: preReset, answers: { diagnosis: 'M05.79' } })).json?.caseId;
+  check('an ePA case from before a reset is not reused', !!postReset && postReset !== preReset);
 }
 
 // Phase checks are appended below as each phase lands.

@@ -57,7 +57,7 @@ export default function PharmacyLookup() {
           Member ID
           <select
             value={memberId}
-            onChange={(e) => setMemberId(e.target.value)}
+            onChange={(e) => { setMemberId(e.target.value); setResult(null); }}
             className="block mt-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200"
           >
             {PATIENT_LIST.map((p) => (
@@ -69,7 +69,7 @@ export default function PharmacyLookup() {
           NDC
           <input
             value={ndc}
-            onChange={(e) => setNdc(e.target.value)}
+            onChange={(e) => { setNdc(e.target.value); setResult(null); }}
             className="block mt-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 w-40"
           />
         </label>

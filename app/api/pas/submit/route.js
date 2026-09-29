@@ -90,7 +90,7 @@ function findRule(rules, orderedCode, serviceCategory) {
 function practitionerNpiOf(bundle) {
   const ids = pickEntry(bundle, 'Practitioner')?.identifier;
   const v = (Array.isArray(ids) ? ids : []).find((i) => i?.system === 'http://hl7.org/fhir/sid/us-npi')?.value;
-  return typeof v === 'string' && v ? v : null;
+  return typeof v === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(v) ? v : null;
 }
 
 export async function handlePOST(request) {
@@ -99,18 +99,27 @@ export async function handlePOST(request) {
   const claim = pickEntry(bundle, 'Claim');
   const patient = pickEntry(bundle, 'Patient');
   const coverage = pickEntry(bundle, 'Coverage');
-  const str = (v) => (typeof v === 'string' && v ? v : null);
+  const str = (v, max = 64) => (typeof v === 'string' && v && v.length <= max ? v : null);
   const firstItem = Array.isArray(claim?.item) ? claim.item[0] : null;
   const orderedCode =
     str(firstItem?.productOrService?.coding?.[0]?.code) ||
     str(bundle.serviceCode) ||
     null;
   const serviceCategory =
-    str(firstItem?.productOrService?.text) || str(bundle.serviceCategory) || null;
+    str(firstItem?.productOrService?.text, 200) || str(bundle.serviceCategory, 200) || null;
   const claimType = claimTypeOf(claim);
-  // The patient id keys records and goes into references, so it must be a
-  // FHIR id.
-  if (patient && !(typeof patient.id === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(patient.id))) {
+  // Each Claim item becomes a ClaimResponse item, so the count is bounded.
+  const items = claim?.item;
+  if (items !== undefined && (!Array.isArray(items) || items.length > 50 ||
+      !items.every((it) => it && typeof it === 'object' && (it.sequence === undefined || (Number.isInteger(it.sequence) && it.sequence > 0))))) {
+    return NextResponse.json(
+      { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'value', diagnostics: 'Claim.item must be an array of at most 50 items with positive integer sequences.' }] },
+      { status: 400 }
+    );
+  }
+  // The patient id keys records and goes into references, so a present id
+  // must be a FHIR id. An entry identified only by fullUrl is allowed.
+  if (patient && patient.id !== undefined && !(typeof patient.id === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(patient.id))) {
     return NextResponse.json(
       { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'value', diagnostics: 'Patient.id must be a FHIR id (letters, digits, - and ., up to 64).' }] },
       { status: 400 }
@@ -140,7 +149,7 @@ export async function handlePOST(request) {
   logTransaction(
     'PAS Gateway',
     'BUNDLE RECEIVED',
-    `FHIR Bundle (type=${bundle.type || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
+    `FHIR Bundle (type=${String(bundle.type || '—').slice(0, 40)}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
     logMeta
   );
 

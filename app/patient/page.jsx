@@ -180,9 +180,9 @@ function EobCard({ eobs }) {
             <tr key={eob.id} className="border-t border-gray-700">
               <td className="py-1.5 pr-3 text-gray-400">{eob.item?.[0]?.servicedDate}</td>
               <td className="py-1.5 pr-3 text-gray-200">{eob.item?.[0]?.productOrService?.text}</td>
-              <td className="py-1.5 pr-3 text-right text-gray-200">${totalByCode(eob, 'submitted')?.toLocaleString() ?? '-'}</td>
-              <td className="py-1.5 pr-3 text-right text-green-300">${totalByCode(eob, 'paidtoprovider')?.toLocaleString() ?? '-'}</td>
-              <td className="py-1.5 text-right text-amber-300">${totalByCode(eob, 'memberliability')?.toLocaleString() ?? '-'}</td>
+              <td className="py-1.5 pr-3 text-right text-gray-200">{totalByCode(eob, 'submitted') != null ? `$${totalByCode(eob, 'submitted').toLocaleString()}` : '-'}</td>
+              <td className="py-1.5 pr-3 text-right text-green-300">{totalByCode(eob, 'paidtoprovider') != null ? `$${totalByCode(eob, 'paidtoprovider').toLocaleString()}` : '-'}</td>
+              <td className="py-1.5 text-right text-amber-300">{totalByCode(eob, 'memberliability') != null ? `$${totalByCode(eob, 'memberliability').toLocaleString()}` : '-'}</td>
             </tr>
           ))}
         </tbody>

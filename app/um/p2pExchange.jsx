@@ -305,9 +305,9 @@ function HistoryStep({ bundle }) {
               <tr key={eob.id} className="border-t border-gray-700">
                 <td className="py-1 pr-3 text-gray-400">{eob.item?.[0]?.servicedDate}</td>
                 <td className="py-1 pr-3 text-gray-200">{eob.item?.[0]?.productOrService?.text}</td>
-                <td className="py-1 pr-3 text-right text-gray-200">${totalBy(eob, 'submitted')?.toLocaleString() ?? '-'}</td>
-                <td className="py-1 pr-3 text-right text-green-300">${totalBy(eob, 'paidtoprovider')?.toLocaleString() ?? '-'}</td>
-                <td className="py-1 text-right text-amber-300">${totalBy(eob, 'memberliability')?.toLocaleString() ?? '-'}</td>
+                <td className="py-1 pr-3 text-right text-gray-200">{totalBy(eob, 'submitted') != null ? `$${totalBy(eob, 'submitted').toLocaleString()}` : '-'}</td>
+                <td className="py-1 pr-3 text-right text-green-300">{totalBy(eob, 'paidtoprovider') != null ? `$${totalBy(eob, 'paidtoprovider').toLocaleString()}` : '-'}</td>
+                <td className="py-1 text-right text-amber-300">{totalBy(eob, 'memberliability') != null ? `$${totalBy(eob, 'memberliability').toLocaleString()}` : '-'}</td>
               </tr>
             ))}
           </tbody>

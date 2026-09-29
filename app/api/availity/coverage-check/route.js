@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { outboundRateLimit } from '@/lib/rateLimit';
 import { checkCoverage, availityMode } from '@/lib/availity';
 import { logTransaction } from '@/lib/db';
@@ -20,6 +21,8 @@ export const dynamic = 'force-dynamic';
  * scope/endpoint discovery.
  */
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 64 * 1024);
+  if (oversized) return oversized;
   const limited = outboundRateLimit('Availity', availityMode());
   if (limited) return limited;
   let body;

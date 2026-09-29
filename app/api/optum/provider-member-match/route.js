@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { outboundRateLimit } from '@/lib/rateLimit';
 import { bulkMemberMatch, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
@@ -30,6 +31,8 @@ export const dynamic = 'force-dynamic';
  * make different points; the /um panel toggles between them.
  */
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 64 * 1024);
+  if (oversized) return oversized;
   const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let body = {};

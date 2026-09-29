@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { issueToken, AUTH_ENABLED } from '@/lib/auth';
 
 /**
@@ -12,6 +13,8 @@ import { issueToken, AUTH_ENABLED } from '@/lib/auth';
  * registered JWKS.
  */
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 16 * 1024);
+  if (oversized) return oversized;
   let grantType = null;
   let scope = '';
   let clientId = null;

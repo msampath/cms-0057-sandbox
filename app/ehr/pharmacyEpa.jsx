@@ -32,10 +32,10 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi, planTyp
       method: 'POST',
       body: JSON.stringify({ step: 'benefit', drugKey, patientId, prescriberNpi, planType, expedited })
     })
-      .then((r) => r.json())
-      .then((json) => {
+      .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json().catch(() => ({})) }))
+      .then(({ ok, status, json }) => {
         if (!live) return;
-        if (json.error) throw new Error(json.error);
+        if (!ok || json.error) throw new Error(json.error || json.issue?.[0]?.diagnostics || `HTTP ${status}`);
         setBenefit(json);
         setAnswers(json.prefill || {});
       })
@@ -65,8 +65,8 @@ export default function PharmacyEpa({ drugKey, patientId, prescriberNpi, planTyp
           answers
         })
       });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) throw new Error(json.error || json.issue?.[0]?.diagnostics || `HTTP ${res.status}`);
       if (mounted.current) setResult(json);
     } catch (err) {
       if (mounted.current) setError(err.message);

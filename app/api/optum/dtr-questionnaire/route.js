@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bodyTooLarge } from '@/lib/bodyLimit';
 import { outboundRateLimit } from '@/lib/rateLimit';
 import { fetchQuestionnairePackage, optumMode } from '@/lib/optumBackend';
 import { logTransaction } from '@/lib/db';
@@ -16,6 +17,8 @@ export const dynamic = 'force-dynamic';
  * pane (which continues to drive the actual PAS submission).
  */
 export async function POST(request) {
+  const oversized = bodyTooLarge(request, 64 * 1024);
+  if (oversized) return oversized;
   const limited = outboundRateLimit('Optum', optumMode());
   if (limited) return limited;
   let body;

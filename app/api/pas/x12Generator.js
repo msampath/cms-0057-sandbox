@@ -75,7 +75,7 @@ function memberId(coverage, patient) {
 // Principal diagnosis from Claim.diagnosis (R4 Patient has no condition).
 function primaryIcd10(claim) {
   const v = claimDiagnosisCodes(claim)[0] || null;
-  return v ? x12Safe(v).replace(/\./g, '') : null;
+  return v ? x12Safe(v).replace(/\./g, '').slice(0, 30) : null;
 }
 
 function servicedDate(claim) {
@@ -87,11 +87,12 @@ function servicedDate(claim) {
 
 function npi(practitioner) {
   const ids = Array.isArray(practitioner?.identifier) ? practitioner.identifier : [];
+  // NM109 is up to 80 characters.
   return x12Safe(
     ids.find((i) => /npi/i.test(String(i?.system || '')))?.value ||
     ids[0]?.value ||
     '1234567890'
-  );
+  ).slice(0, 80);
 }
 
 export function getReceiverId(vendor) {

@@ -35,8 +35,9 @@ async function handlePOST(request) {
   if (v.memberId !== entry.patientId && v.memberId !== member?.subscriberId) {
     return outcome(422, 'error', 'business-rule', `MemberId ${v.memberId} does not match the member on ${v.trackingId}.`);
   }
-  // The attachment must come from the provider who asked, when both are known.
-  if (v.providerId && entry.npi && v.providerId !== entry.npi) {
+  // The attachment must come from the provider who asked. When the payer
+  // knows the requester, ProviderId is required and must match.
+  if (entry.npi && v.providerId !== entry.npi) {
     return outcome(422, 'error', 'business-rule', `ProviderId ${v.providerId} is not the requester on ${v.trackingId}.`);
   }
   if ((entry.attachments || []).length + v.attachments.length > 20) {
