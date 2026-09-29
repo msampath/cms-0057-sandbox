@@ -33,7 +33,9 @@ function codeValidityPct(rules) {
 }
 
 export default function UmDashboard() {
-  const { data, error: logsError } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: 2000 });
+  // The feed polls only while its tab is open. Other tabs read it once.
+  const [tab, setTab] = useState('rules'); // 'rules' | 'feed' | 'provider' | 'p2p' | 'standards' | 'metrics'
+  const { data, error: logsError } = useSWR(apiUrl('/api/logs'), fetcher, { refreshInterval: tab === 'feed' ? 2000 : 0 });
   // SWR dedupes by key — both this and <RulesExplorer> share the same
   // cached response, no double fetch. The full rule set is large, so it is
   // polled slowly and revalidated right after a commit, load, or reset.
@@ -49,7 +51,6 @@ export default function UmDashboard() {
   const [files, setFiles] = useState([]);
   const [staging, setStaging] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [tab, setTab] = useState('rules'); // 'rules' | 'feed' | 'provider' | 'p2p' | 'standards' | 'metrics'
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -99,8 +100,9 @@ export default function UmDashboard() {
     }
 
     const totalExtracted = perFile.reduce((n, p) => n + p.allRules.length, 0);
+    const current = await fetch(apiUrl('/api/rules')).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     const activeKeys = new Set(
-      (rulesData?.rules || []).map(
+      ((current || rulesData)?.rules || []).map(
         (r) => `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`
       )
     );
@@ -143,7 +145,9 @@ export default function UmDashboard() {
   const commitRules = async () => {
     if (committing) return;
     setCommitting(true);
-    const res = await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(staging.rules) }).catch(() => null);
+    // Code rules that fail the code-shape check are left out of the commit.
+    const toCommit = staging.rules.filter((r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || '')));
+    const res = await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(toCommit) }).catch(() => null);
     if (!res?.ok) {
       const json = await res?.json().catch(() => null);
       window.alert(`Commit failed: ${json?.error || (res ? `HTTP ${res.status}` : 'network error')}. The staged rules are kept.`);
@@ -389,7 +393,8 @@ function ResetDemoButton() {
     }
     setBusy(true);
     try {
-      await fetch(apiUrl('/api/demo/reset?mode=seeded'), { method: 'POST' });
+      const res = await fetch(apiUrl('/api/demo/reset?mode=seeded'), { method: 'POST' }).catch(() => null);
+      if (!res?.ok) window.alert(`Reset failed: ${res ? `HTTP ${res.status}` : 'network error'}.`);
       mutateKey(apiUrl('/api/rules'));
       mutateKey(apiUrl('/api/logs'));
     } finally {
@@ -421,7 +426,8 @@ function EmptyStateResetLink() {
     }
     setBusy(true);
     try {
-      await fetch(apiUrl('/api/demo/reset?mode=empty'), { method: 'POST' });
+      const res = await fetch(apiUrl('/api/demo/reset?mode=empty'), { method: 'POST' }).catch(() => null);
+      if (!res?.ok) window.alert(`Reset failed: ${res ? `HTTP ${res.status}` : 'network error'}.`);
       mutateKey(apiUrl('/api/rules'));
       mutateKey(apiUrl('/api/logs'));
     } finally {
@@ -723,9 +729,9 @@ function PerSourcePanel({ perSource }) {
   return (
     <KpiPanel title={`Per-source summary (${perSource.length} file${perSource.length === 1 ? '' : 's'})`}>
       <div className="space-y-2">
-        {perSource.map((g) => (
+        {perSource.map((g, i) => (
           <div
-            key={g.source_file}
+            key={`${g.source_file}:${i}`}
             className={`bg-gray-900 p-2 rounded border ${g.matched ? 'border-gray-700' : 'border-yellow-700'}`}
           >
             <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">

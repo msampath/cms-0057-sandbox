@@ -181,15 +181,13 @@ async function handlePOST(request) {
   const body = await request.json();
 
   // Accept either a CDS-Hooks-shaped payload or the simulator's relaxed shape.
-  const str = (v) => (typeof v === 'string' && v ? v : null);
+  const str = (v, max = 64) => (typeof v === 'string' && v && v.length <= max ? v : null);
   const orderedCode = str(body.code) || str(body.serviceCode);
-  const serviceCategory = str(body.serviceCategory);
+  const serviceCategory = str(body.serviceCategory, 200);
   const planType = str(body.planType);
   const patient = body.patient || body.patientResource || null;
-  const patientId =
-    (patient && patient.id) || body.patientId || 'unknown';
-  const coverageId =
-    (body.coverage && body.coverage.id) || body.coverageId || 'unknown';
+  const patientId = str(patient?.id) || str(body.patientId) || 'unknown';
+  const coverageId = str(body.coverage?.id) || str(body.coverageId) || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
   const practitionerNpi = str(body.practitionerNpi) || str(body.npi);
   // CDS Hooks order-sign sends the order in context.draftOrders. When it
@@ -240,6 +238,15 @@ async function handlePOST(request) {
         `PA is auto-satisfied; no further documentation required.`,
       source: sourceForRule(rule)
     };
+  } else if (hardStopRequested) {
+    card = {
+      summary: 'Order blocked: non-overridable payer decision',
+      indicator: 'hard-stop',
+      detail:
+        `Service **${rule?.description || orderedCode || serviceCategory || 'requested'}** is flagged by the payer as a non-covered or contraindicated scenario. ` +
+        `Reviewed by **${routing.vendor}**. The CDS Hooks 2.0 \`hard-stop\` indicator is non-overridable; the EHR must disable order-sign.`,
+      source: sourceForRule(rule)
+    };
   } else if (!rule && categoryDefault) {
     const def = categoryDefault.default_rule || {};
     card = {
@@ -256,7 +263,7 @@ async function handlePOST(request) {
       summary: 'Prior authorization required (plan default)',
       indicator: 'warning',
       detail:
-        `No grid rule for **${orderedCode || serviceCategory || 'this service'}**, but ${planDefault.plan_name || planType} ` +
+        `No grid rule for **${orderedCode || serviceCategory || 'this service'}**, but ${planDefault.name || planType} ` +
         'requires prior authorization by default. Complete the medical necessity Questionnaire before order-sign.',
       source: sourceForRule(rule),
       links: [
@@ -283,15 +290,6 @@ async function handlePOST(request) {
       summary: 'No prior authorization required',
       indicator,
       detail: `Service **${rule.description}** is covered without prior authorization. Reviewed by **${routing.vendor}**.`,
-      source: sourceForRule(rule)
-    };
-  } else if (hardStopRequested) {
-    card = {
-      summary: 'Order blocked: non-overridable payer decision',
-      indicator: 'hard-stop',
-      detail:
-        `Service **${rule.description}** is on the PA list and patient context indicates a non-covered or contraindicated scenario. ` +
-        `Reviewed by **${routing.vendor}**. The CDS Hooks 2.0 \`hard-stop\` indicator is non-overridable; the EHR must disable order-sign.`,
       source: sourceForRule(rule)
     };
   } else {

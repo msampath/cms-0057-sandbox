@@ -26,6 +26,7 @@ const VENDOR_TO_ISA = {
 // UM03 service type (X12 element 1365):
 //   BH category rules            → MH  Mental Health
 //   J-codes (clinic-administered) → 1   Medical Care
+//   77261-77799 radiation oncology → 6  Radiation Therapy
 //   CT/MRI imaging (by rule text) → 62  MRI/CAT Scan
 //   other 7xxxx radiology         → 4   Diagnostic X-Ray
 //   10000-69999 surgery           → 2   Surgical
@@ -34,6 +35,7 @@ function pickServiceTypeCode(rule, orderedCode) {
   if (rule?.match_type === 'category') return 'MH';
   const code = String(orderedCode || '');
   if (/^J\d{4}$/.test(code)) return '1';
+  if (/^77[2-7]\d{2}$/.test(code) && Number(code) >= 77261) return '6';
   if (/^7\d{4}$/.test(code)) return /\b(MRI|CT|CAT|magnetic|tomograph)/i.test(rule?.description || '') ? '62' : '4';
   if (/^\d{5}$/.test(code) && Number(code) >= 10000 && Number(code) <= 69999) return '2';
   return '1';
@@ -54,18 +56,20 @@ function pickEntry(bundle, resourceType) {
 function patientName(p) {
   if (!p?.name?.[0]) return { family: 'DOE', given: 'JANE' };
   return {
-    family: x12Safe(p.name[0].family || 'UNKNOWN').toUpperCase(),
-    given: x12Safe(p.name[0].given?.[0] || '').toUpperCase()
+    // NM103 is up to 60 characters and NM104 up to 35.
+    family: x12Safe(p.name[0].family || 'UNKNOWN').toUpperCase().slice(0, 60),
+    given: x12Safe(p.name[0].given?.[0] || '').toUpperCase().slice(0, 35)
   };
 }
 
 function memberId(coverage, patient) {
+  // NM109 is up to 80 characters.
   return x12Safe(
     coverage?.subscriberId ||
     coverage?.identifier?.[0]?.value ||
     patient?.id ||
     'UNKNOWN'
-  );
+  ).slice(0, 80);
 }
 
 // Principal diagnosis from Claim.diagnosis (R4 Patient has no condition).
@@ -99,7 +103,7 @@ export function getReceiverId(vendor) {
  *   { x12: <string>, mappings: [{ segment, fhirPath, label, value }, ...] }
  */
 export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, isProduction = false }) {
-  const orderedCode = rawCode == null ? rawCode : x12Safe(rawCode);
+  const orderedCode = rawCode == null ? rawCode : x12Safe(rawCode).slice(0, 48);
   const patient = pickEntry(bundle, 'Patient');
   const coverage = pickEntry(bundle, 'Coverage');
   const practitioner = pickEntry(bundle, 'Practitioner');
@@ -189,6 +193,14 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
     serviceTypeCode
   );
 
+  if (!orderedCode) {
+    push(
+      `DTP*AAH*D8*${dos}`,
+      `Bundle.entry[?Claim].item[0].servicedDate`,
+      'DTP — Event date (no service line)',
+      dos
+    );
+  }
   if (dx) {
     push(
       `HI*ABK:${dx}`,
@@ -214,13 +226,6 @@ export function generateX12_278({ bundle, rule, vendor, orderedCode: rawCode, is
       `Bundle.entry[?Claim].item[0].productOrService.coding[0].code`,
       'SV1 — Professional service (procedure code)',
       `HC:${orderedCode}`
-    );
-  } else {
-    push(
-      `DTP*AAH*D8*${dos}`,
-      `Bundle.entry[?Claim].item[0].servicedDate`,
-      'DTP — Event date (no service line)',
-      dos
     );
   }
 

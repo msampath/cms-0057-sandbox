@@ -30,7 +30,8 @@ const MAX_RULES = 10000;
 // grow either without bound.
 const MAX_TOTAL_RULES = 8000;
 const PA_VALUES = ['no-auth', 'auth-needed', 'performpa', 'satisfied', 'conditional'];
-const ID_FIELD = /^[A-Za-z0-9._-]{1,64}$/;
+const ID_FIELD = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,64}$/;
+const MAX_PER_FILE_ENTRIES = 50;
 const VENDORS = ['BCBSIL', 'Carelon', 'Lucet', 'EviCore', 'Carelon-or-BCBSIL-conditional'];
 const STRING_FIELDS = [
   'service_code', 'service_category', 'description', 'pa_needed', 'managed_by',
@@ -137,22 +138,25 @@ export async function POST(request) {
         snapByKey.set(k, r);
         addedSnapshot++;
       }
-      // Track per-source counts even for duplicates so the snapshot's
-      // perFile metadata reflects every contributor.
+      // perFile tracks only files that added a rule to the snapshot, so a
+      // batch of duplicates cannot add entries.
+      if (snapByKey.get(k) !== r) continue;
       const fname = r.source_file || '(unknown)';
-      const label = r.source_label || 'Unknown';
       if (!filesTouchedThisCommit.has(fname)) {
-        filesTouchedThisCommit.set(fname, { name: fname, label, addedThisCommit: 0 });
+        filesTouchedThisCommit.set(fname, { name: fname, label: r.source_label || 'Unknown' });
       }
-      const entry = filesTouchedThisCommit.get(fname);
-      if (!snapByKey.has(k)) entry.addedThisCommit++;
     }
+
+    // Rule count per source file, in one pass over the snapshot.
+    const countBySource = new Map();
+    for (const r of snapByKey.values()) countBySource.set(r.source_file, (countBySource.get(r.source_file) || 0) + 1);
 
     // Merge perFile metadata: keep existing entries, bump counts, add new
     const existingByName = new Map((snap.perFile || []).map((p) => [p.name, p]));
     for (const [name, info] of filesTouchedThisCommit) {
       const existing = existingByName.get(name);
-      const newTotal = Array.from(snapByKey.values()).filter((r) => r.source_file === name).length;
+      if (!existing && existingByName.size >= MAX_PER_FILE_ENTRIES) continue;
+      const newTotal = countBySource.get(name) || 0;
       if (existing) {
         existing.added = newTotal;
         existing.total = newTotal;

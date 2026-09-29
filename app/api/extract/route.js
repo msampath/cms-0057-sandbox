@@ -42,7 +42,15 @@ function detectKind(filename) {
 let extracting = false;
 
 export async function POST(request) {
-  if (Number(request.headers.get('content-length') || 0) > MAX_UPLOAD_BYTES) {
+  const declared = request.headers.get('content-length');
+  if (declared === null) {
+    return NextResponse.json({ error: 'Content-Length is required' }, { status: 411 });
+  }
+  // Refuse early while another extraction runs, before buffering the upload.
+  if (extracting) {
+    return NextResponse.json({ error: 'another extraction is running, try again shortly' }, { status: 429 });
+  }
+  if (Number(declared) > MAX_UPLOAD_BYTES) {
     return NextResponse.json({ error: `file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, { status: 413 });
   }
   // The upload is read before the lock is taken, so a slow upload cannot

@@ -37,8 +37,9 @@ console.log('');
 console.log('# Derived kid (for reference — lib/keys.js recomputes this from the key):');
 console.log('#   ' + kid);
 console.log('');
-console.log('# Set on Cloud Run (base64 alphabet has no commas, so no escaping needed):');
-console.log(
-  '#   gcloud run services update cms-0057-demo --region us-central1 \\'
-);
-console.log('#     --update-env-vars SANDBOX_PRIVATE_KEY_B64=' + b64);
+// The key is printed once, above. Storing it in Secret Manager keeps it out
+// of shell history and out of the service's plain env vars.
+console.log('# Store it in Secret Manager and mount it on Cloud Run:');
+console.log('#   printf %s "<value above>" | gcloud secrets create sandbox-private-key --data-file=-');
+console.log('#   gcloud run services update cms-0057-demo --region us-central1 \\');
+console.log('#     --update-secrets SANDBOX_PRIVATE_KEY_B64=sandbox-private-key:latest');

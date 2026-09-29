@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb, logTransaction, getDrugPaRecord, upsertDrugPaRecord, nextRequestId } from '@/lib/db';
+import { getDb, logTransaction, getDrugPaRecord, upsertDrugPaRecord, nextRequestId, openEpaCase, getEpaCase } from '@/lib/db';
 import { resolvePharmacyRouting } from '@/lib/routing';
 import { DRUG_CATALOG, DRUG_DENIAL_REASONS, decideDrugPa, sanitizeDrugAnswers } from '@/lib/drugPa';
 import { decisionClock } from '@/lib/decisionClock';
@@ -28,23 +28,17 @@ import { withUsage } from '@/lib/withUsage';
  * Structured NCPDP payloads are logged without patient meta, like the X12
  * 278 request, so the access APIs only see the plain-text determination.
  */
-// ePA case → the time the benefit step opened it. The server keeps the
-// clock start, so a client cannot move it, and a submit may only reuse a
-// case this server opened. Capped like the other in-memory maps.
-const caseStarts = new Map();
-function rememberCase(caseId, receivedAt) {
-  caseStarts.set(caseId, receivedAt);
-  while (caseStarts.size > 2000) caseStarts.delete(caseStarts.keys().next().value);
-}
-
 async function handlePOST(request) {
   const body = await request.json().catch(() => ({}));
-  const { step, drugKey, patientId, prescriberNpi = 'unknown' } = body;
+  const { step, drugKey, patientId } = body;
+  const prescriberNpi = body.prescriberNpi ?? null;
   const expedited = body.expedited === true;
   // The clock starts when the benefit step opens the case. A submit
   // reuses that start, whatever the client sends.
-  const knownCase = typeof body.caseId === 'string' && caseStarts.has(body.caseId);
-  const receivedAt = step === 'submit' && knownCase ? caseStarts.get(body.caseId) : new Date().toISOString();
+  // A case is reused only by the same patient and drug that opened it.
+  const opened = getEpaCase(body.caseId);
+  const knownCase = !!opened && opened.patientId === patientId && opened.drugKey === drugKey;
+  const receivedAt = step === 'submit' && knownCase ? opened.receivedAt : new Date().toISOString();
   const ID = /^[A-Za-z0-9._-]{1,64}$/;
   const drug = typeof drugKey === 'string' && Object.hasOwn(DRUG_CATALOG, drugKey) ? DRUG_CATALOG[drugKey] : null;
   if (!drug || typeof patientId !== 'string' || !ID.test(patientId) || !['benefit', 'submit'].includes(step)) {
@@ -53,7 +47,7 @@ async function handlePOST(request) {
       { status: 400 }
     );
   }
-  if (typeof prescriberNpi !== 'string' || !ID.test(prescriberNpi)) {
+  if (prescriberNpi !== null && (typeof prescriberNpi !== 'string' || !ID.test(prescriberNpi))) {
     return NextResponse.json({ error: 'prescriberNpi must be an identifier string' }, { status: 400 });
   }
   // Configured plans plus the member plans with a clock (Medicaid, QHP).
@@ -85,7 +79,7 @@ async function handlePOST(request) {
 
   if (step === 'benefit') {
     const caseId = nextRequestId('EPA');
-    rememberCase(caseId, receivedAt);
+    openEpaCase(caseId, { patientId, drugKey, receivedAt });
     const args = { drugKey, patientId, prescriberNpi, pbm, caseId };
     const formulary = formularyLookup(drugKey);
     const messages = [
@@ -174,8 +168,8 @@ async function handlePOST(request) {
         determination: decision.determination,
         planType,
         noAnswers,
-        // The benefit step's time when the caller passes it, else now.
-        receivedAt: clock.receivedAt || receivedAt || new Date().toISOString(),
+        // The benefit step's time for a case this server opened, else now.
+        receivedAt: clock.receivedAt || receivedAt,
         decidedAt: new Date().toISOString()
       }
     }

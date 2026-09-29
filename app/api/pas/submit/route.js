@@ -108,6 +108,14 @@ export async function handlePOST(request) {
   const serviceCategory =
     str(firstItem?.productOrService?.text) || str(bundle.serviceCategory) || null;
   const claimType = claimTypeOf(claim);
+  // The patient id keys records and goes into references, so it must be a
+  // FHIR id.
+  if (patient && !(typeof patient.id === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(patient.id))) {
+    return NextResponse.json(
+      { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'value', diagnostics: 'Patient.id must be a FHIR id (letters, digits, - and ., up to 64).' }] },
+      { status: 400 }
+    );
+  }
   const coverageId = str(coverage?.id) || getPatient(patient?.id)?.coverageId || null;
   // Every decision log carries the requesting NPI, so Provider Access shows
   // item PAs as well as CRD events.
@@ -217,7 +225,7 @@ export async function handlePOST(request) {
   const recordDrugDecision = (authNumber, { forced = false } = {}) => {
     if (!drugKey) return;
     const hasAnswers = !!drugAnswers && Object.keys(drugAnswers).length > 0;
-    const npi = practitionerNpiOf(bundle);
+    const npi = logMeta.npi;
     const modelDecision = !forced && hasAnswers;
     upsertDrugPaRecord(patient?.id || 'unknown', drugKey, {
       ...(modelDecision ? { answers: drugAnswers, decision: drugDecision } : {}),

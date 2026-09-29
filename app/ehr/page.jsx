@@ -446,6 +446,9 @@ export default function EhrDashboard() {
   const [attachmentResult, setAttachmentResult] = useState(null);
   const [attachmentSending, setAttachmentSending] = useState(false);
   const selfSignAtRef = useRef(0);
+  // The pend currently shown, read by async handlers after an await.
+  const pendedIdRef = useRef(null);
+  pendedIdRef.current = pendedId;
   // Route PAS through the simulated clearinghouse (conformance check), and
   // optionally claim an unsupported PAS version to see it rejected.
   const [viaClearinghouse, setViaClearinghouse] = useState(false);
@@ -552,6 +555,7 @@ export default function EhrDashboard() {
   // cheap on keystrokes where nothing is actually dirty.
   const invalidateOrderContext = () => {
     scenarioVersionRef.current += 1;
+    selfSignAtRef.current = 0;
     setPasSentAt(null);
     setPasDecidedAt(null);
     setCdexTask(null);
@@ -624,6 +628,7 @@ export default function EhrDashboard() {
     // (harmless: nothing in flight) and on every scenario or Epic
     // patient change.
     scenarioVersionRef.current += 1;
+    selfSignAtRef.current = 0;
     setPlanType(scenario.planType);
     if (scenario.defaultOrderIndex != null) {
       setSelectedIndex(scenario.defaultOrderIndex);
@@ -1083,18 +1088,25 @@ export default function EhrDashboard() {
     setClearinghouseRejection(null);
     setCdexTask(null);
     setAttachmentResult(null);
-    const [pasResult, optumResp] = await Promise.allSettled([
-      fetch(apiUrl(viaClearinghouse ? '/api/clearinghouse/pas' : '/api/pas/submit'), {
-        method: 'POST',
-        body: JSON.stringify(bundle)
-      }).then((r) => r.json()),
-      fetch(apiUrl('/api/optum/pas-submit'), {
-        method: 'POST',
-        body: JSON.stringify(bundle)
-      })
-        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .catch((e) => ({ ok: false, status: 0, json: { error: e.message } }))
-    ]);
+    // Optum's second opinion runs on its own, so a slow upstream does not
+    // hold this payer's decision.
+    fetch(apiUrl('/api/optum/pas-submit'), {
+      method: 'POST',
+      body: JSON.stringify(bundle)
+    })
+      .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+      .catch((e) => ({ ok: false, status: 0, json: { error: e.message } }))
+      .then((v) => {
+        if (!stillCurrent()) return;
+        setOptumPasResult(v);
+        setOptumPasLoading(false);
+      });
+    const pasResult = await fetch(apiUrl(viaClearinghouse ? '/api/clearinghouse/pas' : '/api/pas/submit'), {
+      method: 'POST',
+      body: JSON.stringify(bundle)
+    })
+      .then((r) => r.json())
+      .then((value) => ({ status: 'fulfilled', value }), (reason) => ({ status: 'rejected', reason }));
 
     if (!stillCurrent()) return; // scenario switched mid-flight
     if (pasResult.status === 'fulfilled') {
@@ -1129,10 +1141,6 @@ export default function EhrDashboard() {
         issue: [{ severity: 'error', diagnostics: `PAS request failed: ${pasResult.reason?.message || 'network error'}` }]
       });
     }
-    if (optumResp.status === 'fulfilled') {
-      setOptumPasResult(optumResp.value);
-    }
-    setOptumPasLoading(false);
     setShowDtr(false);
     setLoading(false);
   };
@@ -2026,6 +2034,7 @@ export default function EhrDashboard() {
                   disabled={attachmentSending}
                   onClick={async () => {
                     if (attachmentSending) return;
+                    const forPend = pendedId;
                     // Answer with the member id the payer put in the Task, so
                     // Epic sandbox patients (not in lib/patients.js) match too.
                     const myVersion = scenarioVersionRef.current;
@@ -2044,8 +2053,8 @@ export default function EhrDashboard() {
                         body: JSON.stringify(params)
                       });
                       const json = await res.json().catch(() => ({}));
-                      // Drop the result if the scenario or order changed meanwhile.
-                      if (scenarioVersionRef.current !== myVersion) return;
+                      // Drop the result if the scenario, order, or pend changed meanwhile.
+                      if (scenarioVersionRef.current !== myVersion || pendedIdRef.current !== forPend) return;
                       setAttachmentResult({ ok: res.ok, text: json?.issue?.[0]?.diagnostics || `HTTP ${res.status}` });
                     } catch (e) {
                       if (scenarioVersionRef.current === myVersion) setAttachmentResult({ ok: false, text: e.message || 'network error' });

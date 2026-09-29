@@ -397,11 +397,23 @@ async function phase4() {
   const prov = (await call('/api/provider-access?npi=1234567890', { headers: { authorization: 'Bearer ' + sTok } })).json;
   const marcus = prov?.patients?.find((p) => p.patientId === pid);
   check('Provider Access returns the same drug PAs for the attributed patient', (marcus?.priorAuthorizations || []).some((e) => pdexReview(e)?.reason === '44'));
-  // The medical-track PAS Bundle above names no Practitioner, so only the
-  // pharmacy track (prescriber 1234567890) belongs to this NPI's panel.
-  check('Provider Access drug PAs follow the NPI (only the pharmacy track for 1234567890)',
-    (marcus?.priorAuthorizations || []).length === 1 && marcus.priorAuthorizations[0].type?.coding?.[0]?.code === 'pharmacy',
+  // The medical-track PAS Bundle names no Practitioner, so it falls back to
+  // the member's own NPI, like the log. Both tracks belong to 1234567890,
+  // and neither shows under another NPI.
+  check('Provider Access drug PAs follow the NPI (both tracks for 1234567890)',
+    (marcus?.priorAuthorizations || []).length === 2,
     JSON.stringify((marcus?.priorAuthorizations || []).map((e) => e.type?.coding?.[0]?.code)));
+  // Put Marcus in a second NPI's panel with an item PAS. His drug PAs belong
+  // to 1234567890, so they must not come with him.
+  const other = pasBundle('70553');
+  other.entry[0].resource.id = pid;
+  other.entry.push({ resource: { resourceType: 'Practitioner', identifier: [{ system: 'http://hl7.org/fhir/sid/us-npi', value: 'REG-NPI-0004' }] } });
+  await post('/api/pas/submit', other);
+  const otherPanel = (await call('/api/provider-access?npi=REG-NPI-0004', { headers: { authorization: 'Bearer ' + sTok } })).json;
+  const marcusElsewhere = otherPanel?.patients?.find((p) => p.patientId === pid);
+  check('Provider Access drug PAs do not show under another NPI',
+    !!marcusElsewhere && (marcusElsewhere.priorAuthorizations || []).length === 0,
+    JSON.stringify(marcusElsewhere?.priorAuthorizations?.length));
 
   // A forced debug denial is not a model decision and stays out of the access APIs.
   const forced = { ...drugPasBundle('pat-3301-dorothy-hayes', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true }), _simulateDenial: true };
@@ -678,6 +690,19 @@ async function hardening() {
   const refs = sameMs.map((r) => r.json?.entry?.[0]?.resource?.preAuthRef);
   check('two concurrent approvals get different auth numbers', refs[0] && refs[1] && refs[0] !== refs[1], refs.join(' '));
   check('commit-rules rejects a non-array body → 400', (await post('/api/commit-rules', { rules: [] })).status === 400);
+  // Each batch ends in a bad rule, so nothing is ever written.
+  const bogus = { match_type: 'bogus', service_code: '99999' };
+  const idxOf = async (rules) => (await post('/api/commit-rules', rules)).json?.error || '';
+  check('commit-rules rejects a bad pa_needed', /rule 0 /.test(await idxOf([{ match_type: 'code', service_code: '99990', pa_needed: 'maybe' }, bogus])));
+  check('commit-rules rejects a category under 4 characters', /rule 0 /.test(await idxOf([{ match_type: 'category', service_category: 'ab' }, bogus])));
+  check('commit-rules rejects a questionnaire_id of ..', /rule 0 /.test(await idxOf([{ match_type: 'code', service_code: '99991', questionnaire_id: '..' }, bogus])));
+  check('commit-rules names the first bad rule', /rule 1 /.test(await idxOf([{ match_type: 'code', service_code: '99992' }, bogus])));
+  check('token endpoint rejects a scope over 1000 characters', (await fetch(BASE + '/api/auth/token', { method: 'POST', body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'x'.repeat(1001) }) })).status === 400);
+  const big = pasBundle('70553');
+  big.entry[0].resource.text = { status: 'generated', div: '<div>' + 'x'.repeat(70000) + '</div>' };
+  await post('/api/pas/submit', big);
+  const bigLog = (await logsFor(/^X12 278 REQUEST$/))[0];
+  check('a PAS Bundle over 64 KB is not kept in the log', /not kept in the log/.test(bigLog?.details?.bundle?.note || ''));
 
   console.log('\nSuper-review hardening: CRD and X12');
   const goldNoNpi = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-g1', code: '27447', planType: 'COMM-PPO', patientId: 'pat-3301-dorothy-hayes', patient: { id: 'pat-3301-dorothy-hayes' } })).json;
@@ -697,7 +722,7 @@ async function hardening() {
   const approvedBundle = (await post('/api/pas/submit', pasBundle('70553'))).json;
   const approvedOrder = orderIn(approvedBundle);
   check('PAS approval returns the order with pa-needed satisfied and the auth number as satisfied-pa-id',
-    ciPart(approvedOrder, 'pa-needed')?.valueCode === 'satisfied' && ciPart(approvedOrder, 'satisfied-pa-id')?.valueString === approvedBundle?.entry?.[0]?.resource?.preAuthRef);
+    !!approvedBundle?.entry?.[0]?.resource?.preAuthRef && ciPart(approvedOrder, 'pa-needed')?.valueCode === 'satisfied' && ciPart(approvedOrder, 'satisfied-pa-id')?.valueString === approvedBundle.entry[0].resource.preAuthRef);
   check('ClaimResponse.type defaults to professional', approvedBundle?.entry?.[0]?.resource?.type?.coding?.[0]?.code === 'professional');
   const inj = pasBundle('70553');
   inj.entry[0].resource.name = [{ family: 'Doe~NM1*XX', given: ['Jane'] }];
@@ -722,20 +747,43 @@ async function hardening() {
     /plan default/.test(hmo?.cards?.[0]?.summary || '') && ciPart(hmoOrder, 'pa-needed')?.valueCode === 'auth-needed', hmo?.cards?.[0]?.summary);
   const ppo = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h2', code: '99999', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' } })).json;
   check('COMM-PPO: a code with no rule is covered, no-auth', ciPart(ppo?.systemActions?.[0]?.resource, 'pa-needed')?.valueCode === 'no-auth' && ciPart(ppo?.systemActions?.[0]?.resource, 'covered')?.valueCode === 'covered');
+  const hsNoRule = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h5', code: '99999', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, 'hard-stop-trigger': true })).json;
+  check('hard stop on a code with no rule still shows the blocking card', /Order blocked/.test(hsNoRule?.cards?.[0]?.summary || ''), hsNoRule?.cards?.[0]?.summary);
   const hsRes = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h3', code: '70553', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, 'hard-stop-trigger': true })).json;
   const hsOrder = hsRes?.systemActions?.[0]?.resource;
   check('hard stop: order not-covered, no pa-needed', hsRes?.cards?.[0]?.indicator === 'hard-stop' && ciPart(hsOrder, 'covered')?.valueCode === 'not-covered' && !ciPart(hsOrder, 'pa-needed'));
   const draft = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h4', code: '70553', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, context: { draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'draft-sr-1' } }] } } })).json;
   check('the update targets the draft order id', draft?.systemActions?.[0]?.resource?.id === 'draft-sr-1' && draft.systemActions[0].resource.status === 'draft');
-  const provJane = (await call('/api/provider-access?npi=1234567890', auth(sTok))).json?.patients?.find((p) => p.patientId === 'pat-8849-jane-doe');
-  check('Provider Access shows item PA decisions for the requesting NPI', (provJane?.events || []).some((e) => e.action === 'FHIR RESPONSE'));
+  // Live decisions under an NPI the seed never uses: approve, deny, pend.
+  const withNpi = (b, npi) => ({ ...b, entry: [...b.entry, { resource: { resourceType: 'Practitioner', identifier: [{ system: 'http://hl7.org/fhir/sid/us-npi', value: npi }] } }] });
+  await post('/api/pas/submit', withNpi(pasBundle('70553'), 'REG-NPI-0003'));
+  await post('/api/pas/submit', withNpi(pasBundle('70553', { _simulateDenial: true }), 'REG-NPI-0003'));
+  await post('/api/pas/submit', withNpi(pasBundle('15820', {}, 'MA-PPO'), 'REG-NPI-0003'));
+  const regPanel = (await call('/api/provider-access?npi=REG-NPI-0003', auth(sTok))).json?.patients?.[0]?.events?.map((e) => e.action) || [];
+  check('Provider Access shows live item PA decisions for the requesting NPI (approve, deny, pend)',
+    ['FHIR RESPONSE', 'FHIR RESPONSE (DENIAL)', 'PA PENDED'].every((a) => regPanel.includes(a)), JSON.stringify(regPanel));
+  check('a Coverage for one member cannot match another member by patient id → 422', (await post('/api/payer-to-payer/member-match', {
+    resourceType: 'Parameters',
+    parameter: [{ name: 'MemberPatient', resource: { resourceType: 'Patient', id: 'pat-8849-jane-doe' } }, { name: 'CoverageToMatch', resource: { resourceType: 'Coverage', subscriberId: 'BCBSIL-MEM-552' } }]
+  }, { authorization: 'Bearer ' + p2pTok })).status === 422);
+  check('PAS with a Patient.id that is not a FHIR id → 400', (await post('/api/pas/submit', { ...pasBundle('70553'), entry: [{ resource: { resourceType: 'Patient', id: {} } }, pasBundle('70553').entry[1]] })).status === 400);
   check('member-match for a member with no prior-plan history → 422', (await post('/api/payer-to-payer/member-match', {
     resourceType: 'Parameters',
     parameter: [{ name: 'MemberPatient', resource: { resourceType: 'Patient', id: 'pat-5520-maria-santos' } }, { name: 'CoverageToMatch', resource: { resourceType: 'Coverage', subscriberId: 'BCBSIL-MEM-552' } }]
   }, { authorization: 'Bearer ' + p2pTok })).status === 422);
-  const rxOpen = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe' })).json;
-  const rxLate = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', caseId: rxOpen?.caseId, receivedAt: '2000-01-01T00:00:00Z', answers: { diagnosis: 'M05.79' } })).json;
-  check('pharmacy submit keeps the server clock start, not the client value', rxLate?.caseId === rxOpen?.caseId && rxLate?.clock?.receivedAt === rxOpen?.clock?.receivedAt);
+  // David Kim is on a QHP, which has a drug clock, so the start is observable.
+  const rxOpen = (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'pat-4410-david-kim' })).json;
+  await sleep(1100);
+  const rxLate = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-4410-david-kim', caseId: rxOpen?.caseId, receivedAt: '2000-01-01T00:00:00Z', answers: { diagnosis: 'M05.79' } })).json;
+  check('pharmacy submit keeps the server clock start, not the client value',
+    rxOpen?.clock?.applies === true && rxLate?.caseId === rxOpen?.caseId && !!rxOpen.clock.receivedAt &&
+    rxLate?.clock?.receivedAt === rxOpen.clock.receivedAt && !rxLate.clock.receivedAt.startsWith('2000'),
+    JSON.stringify([rxOpen?.clock?.receivedAt, rxLate?.clock?.receivedAt]));
+  const rxOther = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', caseId: rxOpen?.caseId, answers: { diagnosis: 'M05.79' } })).json;
+  check('another patient cannot reuse that ePA case', !!rxOther?.caseId && rxOther.caseId !== rxOpen?.caseId);
+  await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-3301-dorothy-hayes', answers: { diagnosis: 'M05.79', evil: 'x', 'tb-screen-negative': 'y'.repeat(100) } });
+  const dorAns = (await call('/api/drug-pa/record?patientId=pat-3301-dorothy-hayes&drugKey=certolizumab')).json?.record?.answers || {};
+  check('pharmacy answers are cut to the drug questions and short values', dorAns.diagnosis === 'M05.79' && !('evil' in dorAns) && !('tb-screen-negative' in dorAns), JSON.stringify(dorAns));
   const rxForged = (await post('/api/drug-pa/pharmacy', { step: 'submit', drugKey: 'certolizumab', patientId: 'pat-8849-jane-doe', caseId: 'EPA-NOT-OPENED', answers: { diagnosis: 'M05.79' } })).json;
   check('pharmacy submit with a case this server did not open gets a new case id', !!rxForged?.caseId && rxForged.caseId !== 'EPA-NOT-OPENED');
 
@@ -746,7 +794,7 @@ async function hardening() {
   check('Optum $davinci-data-export kickoff (mock) returns a job id', kick.status === 200 && !!kick.json?.jobId);
   const stat = await call('/api/optum/export/status/' + encodeURIComponent(kick.json?.jobId || 'x'));
   check('Optum export status (mock) returns a manifest', stat.status === 200 && Array.isArray(stat.json?.response?.output));
-  check('Optum export status rejects a dot-dot job id → 400', (await call('/api/optum/export/status/..')).status !== 200);
+  check('Optum export status rejects a bad job id → 400', (await call('/api/optum/export/status/a%21b')).status === 400);
   check('Optum order-sign with a JSON null body → 400', (await post('/api/optum/cds-order-sign', null)).status === 400);
   check('Availity coverage check (mock) → 200', (await post('/api/availity/coverage-check', { patientId: 'pat-8849-jane-doe' })).status === 200);
   check('DTR prepopulate with an unknown library → 404 before any Epic call', (await post('/api/dtr/prepopulate', { epicPatientId: 'erXuFYUfucBZaryVksYEcMg3', libraryId: 'Nope' })).status === 404);

@@ -38,7 +38,10 @@ async function handlePOST(request) {
     // coverage for can match. Otherwise the history call would 404.
     if (!Object.hasOwn(PRIOR_PLAN_HISTORY, matchedPatientId)) matchedPatientId = null;
   }
-  if (!matchedPatientId && memberPatient?.id && ALL_PATIENT_IDS.includes(memberPatient.id)) {
+  // The patient-id fallback applies only when the Coverage names no known
+  // subscriber. A Coverage for one member cannot match another.
+  const subscriberKnown = typeof coverageToMatch?.subscriberId === 'string' && Object.hasOwn(PATIENT_ID_BY_SUBSCRIBER, coverageToMatch.subscriberId);
+  if (!matchedPatientId && !subscriberKnown && memberPatient?.id && ALL_PATIENT_IDS.includes(memberPatient.id)) {
     matchedPatientId = memberPatient.id;
   }
 
