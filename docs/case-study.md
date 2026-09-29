@@ -29,6 +29,7 @@ Scale is deliberately small. This is a sandbox for walking through the moving pa
 | 2026-07-05 | The three remaining APIs and their surfaces, then deployability, then a seven-commit conformance pass, then hosting, then screenshots and a demo script |
 | 2026-07-06 | README split into a lean entry point plus `docs/` |
 | 2026-07-28 | Live at `surakshith.com/cms-0057` behind a Firebase Hosting rewrite |
+| 2026-09-28 to 09-29 | CMS-0062-P (proposed rule): a validated plan, then eight phase commits on the `cms-0062-p` branch, each through adversarial review |
 
 The May and June work happened in Claude Desktop chats. Those transcripts are not on disk, so that stretch of the timeline is reconstructed from commit history and from the documents those sessions produced (`CMS-0057-F-overview.md`, `provider-patient-p2p-research.md`). Everything from July onward is reconstructed from Claude Code session transcripts.
 
@@ -132,9 +133,43 @@ Carried in the README roadmap, roughly in the order I would pick them up:
 - Bulk FHIR `$export` for the Payer-to-Payer history endpoint, in place of the synchronous searchset Bundle
 - Asymmetric SMART auth, RS256 plus a JWKS endpoint, in place of the shared HS256 demo secret
 - More agentic PDF ingestion, an LLM classification pass over the text the parser already pulls, with the current regex extractor as a confidence-gated fallback
-- The CMS-0062-P items, since the proposed rule names the same IG versions this repo already targets
+- The CMS-0062-P follow-ups: an appeal flow, NCPDP cancel and appeal messages, and pharmacy-benefit PAs in the PDex profile once PDex admits NDC codes
 
 ---
+
+## Extending to CMS-0062-P
+
+CMS-0062-P is the proposed follow-on rule. It extends prior authorization to drugs, proposes FHIR as the HIPAA standard, and adds reporting. I built it in one overnight run, as a plan and eight phases, with a working rule I set up front: nothing merges without two reviewers who are trying to prove it wrong.
+
+**Method**
+
+- The plan came first. It was validated against the proposed rule text and eCFR before any code, and each of my positions on the rule was tied to the page and paragraph it answers
+- Claude Code (Opus 5.5) built each phase. Gemini 3.8 Flash and Gemini 3.1 Pro then reviewed it adversarially through the `agy` CLI, and every finding was checked against the code or a primary source before I acted on it. I rejected a fair number, with the evidence written back to the reviewers so they would not re-raise them
+- Two check scripts grew with the phases: `npm run regression` (API behavior, 165 checks after Phase 7) and `npm run ui-smoke` (every surface in a real browser, including clicks that fire client fetches)
+- After the phases, Opus 5.5 and Sonnet 5.5 ran a report-only super-review through the `claude` CLI, in rounds. Each round I checked every finding against the code, fixed the confirmed ones in one commit, and wrote the rejected ones back with my reasons. I stopped after round 11, the third round in a row with nothing above LOW from either reviewer
+- By then the checks stood at 291 in `npm run regression`, 19 steps in `npm run ui-smoke`, and 12 cases in `node scripts/testElm.mjs`
+
+**Things the review loop caught that I would likely have shipped**
+
+- My UI smoke script passed while broken. A variable it used was never declared, the error was swallowed inside an event handler, and every step reported ok. Gemini Flash found it by reading the code
+- A PAS pend used `outcome: queued`, which the PAS 2.2.1 profile does not allow. The reviewers disagreed on this one, and the IG's own pended example settled it
+- The PDex Prior Authorization profile only admits CPT, HCPCS, and HIPPS codes, so an NDC-coded pharmacy PA cannot conform. I left that EOB without the profile claim and wrote it down as a finding rather than borrowing a medical code
+- US Core 3.1.1 had already expired from 45 CFR 170.215 on January 1, 2026. The Patient Access API still claimed it, so Phase 7 moved it to 6.1.0
+
+**Things the super-review caught that the phase reviews did not**
+
+- The compiled CQL that actually runs (the hand-authored ELM) checked only that a Condition existed. The CQL source filters to active G or R codes, so a patient with only hypertension got a yes pre-fill for the MRI brain order. The ELM now carries the full filter, and `testElm.mjs` checks it against negative cases
+- CRD coverage-information was a Task with flattened `#covered`-style extensions. The CRD StructureDefinition defines one complex extension on the order resource, so it moved to a ServiceRequest, with the IG's invariants
+- The X12 278 carried the service type in UM01, an ICD-9 qualifier for the diagnosis, and the procedure in HI. It now follows the TR3 loop layout for what it carries
+- A gold card applied when no NPI was sent at all, and CRD ignored a standard CDS Hooks request (`context.patientId`, `draftOrders`, `prefetch`)
+- Several unauthenticated routes held caller-sized strings or bodies in memory. The fix that held was central: one body-size guard for every POST route and a size cap inside the log, rather than one site at a time
+- The SMART launch page would follow any discovery document into a redirect, including a `javascript:` URL, and the upload route took a client file path
+
+**Things I got wrong along the way**
+
+- Adalimumab was the drug in the plan. It is not on the BCBSIL grid, and this repo does not add synthetic rules, so the build uses certolizumab, whose grid row happens to say "not for use when drug is self administered"
+- A few of my scripted multi-file edits aborted partway and left half a fix in place. The reviewers noticed before I did, which is part of why the loop runs after every phase and not just at the end
+- Several super-review fixes needed a second pass. A fix for one site left a sibling site open, or a check I added passed for the wrong reason. The next round usually found it, which is the argument for running the rounds until they come back quiet
 
 ## Where to look first
 

@@ -106,7 +106,7 @@ The `/ehr` DTR pane then maps demographic defines (`PatientGivenName` / `Patient
 Design constraints worth naming:
 
 - Epic's public FHIR sandbox does not expose a server-side CQL evaluation endpoint (`$cql` or `Library/$evaluate`). Client-side execution is the actual Da Vinci DTR pattern in the wild, and that is what happens here.
-- `cql-execution` runs ELM JSON, not CQL text. There is no pure-JS CQL-to-ELM translator. The reference implementation is Java. ELM must be precompiled offline (cqframework's translation service, or the Java CLI) and committed. The committed `.elm.json` for MRIBrainPrepopulation was hand-authored to a minimal shape when the public translators were unreachable. The accompanying `.cql` documents the intent and is what to feed the translator when the library changes.
+- `cql-execution` runs ELM JSON, not CQL text. There is no pure-JS CQL-to-ELM translator. The reference implementation is Java. ELM must be precompiled offline (cqframework's translation service, or the Java CLI) and committed. The committed `.elm.json` for MRIBrainPrepopulation was hand-authored when the public translators were unreachable. It executes the same filter as the `.cql` (an active Condition with an ICD-10-CM code starting with G or R), and `node scripts/testElm.mjs` checks it against positive and negative cases. The accompanying `.cql` documents the intent and is what to feed the translator when the library changes.
 - Extending the library to a real clinical define (e.g. "chest pain in last 6 months from Observation with LOINC 8577-6") is one CQL edit → one re-translation → one linkId heuristic in `/ehr`. The pipeline is the work. Adding defines is downstream mechanics.
 
 **Live verification outcome**
@@ -241,7 +241,7 @@ Four operations are wired in, covering the full CRD → DTR → PAS chain plus P
 
 `payerId` is `87726` for every operation. `lob` (line of business) differs: `ph` for the three Prior Authorization operations, `bh` for Provider Access.
 
-Mode indicator on each response, same convention as Availity: `live`, `mock-no-credentials`, `mock-forced`, `disabled` (`OPTUM_ENABLED=off`).
+Mode indicator on each response, same convention as Availity: `live`, `mock-no-credentials`, `mock-forced`, `disabled` (`OPTUM_ENABLED=off`). The panels in `/ehr` and `/um` label it for people rather than printing the mode: "Optum sandbox response" when `live`, and "Optum sandbox response (saved copy)" in either mock mode, since no call is made then (`lib/integrationLabel.js`). Availity panels follow the same rule.
 
 **Three real quirks Optum's own documentation got wrong**, found only by empirical testing against the live sandbox:
 

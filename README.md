@@ -1,6 +1,6 @@
 # CMS-0057-F Interoperability Sandbox
 
-A working model of the payer side of the CMS Interoperability and Prior Authorization final rule (CMS-0057-F). All four mandated FHIR APIs are implemented end to end, driven by approximately 3,154 rules extracted from four publicly available 2026 prior authorization grids.
+A working model of the payer side of the CMS Interoperability and Prior Authorization final rule (CMS-0057-F). All four mandated FHIR APIs are implemented end to end, driven by approximately 3,154 rules extracted from four publicly available 2026 prior authorization grids. It also models the proposed follow-on rule, CMS-0062-P, which extends prior authorization to drugs.
 
 The rule data comes from publicly available BCBSIL documents ([Medicare Advantage](https://www.bcbsil.com/docs/provider/il/claims/um/2026-ma-pa-codelist-q2.pdf), [Commercial Med-Surg](https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-med-surg-pa-code-list.pdf), [Specialty Pharmacy](https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-specialty-pharmacy-pa-code-list.pdf), [Behavioral Health](https://www.bcbsil.com/docs/provider/il/claims/um/2026-commercial-bh-pa-code-list.pdf)). Not affiliated with or endorsed by BCBSIL or CMS.
 
@@ -37,6 +37,19 @@ The 45 CFR sections above are for QHP issuers. The parallel sections are 42 CFR 
 
 The three access APIs enforce SMART-style Bearer tokens issued by a demo token endpoint (`POST /api/auth/token`, discovery at `/api/.well-known/smart-configuration`). Calling them without a token returns a 401 with an OperationOutcome, which the UI can demonstrate live.
 
+## CMS-0062-P, the proposed follow-on rule
+
+[CMS-0062-P](https://www.federalregister.gov/documents/2026/04/14/2026-07205/medicare-and-medicaid-programs-patient-protection-and-affordable-care-act-interoperability-standards) was published April 14, 2026. It is not final, so everything here follows the proposed text. What the sandbox models:
+
+- **One drug, two benefits.** Certolizumab on the real BCBSIL grid (J0717, "not for use when drug is self administered"). Clinic-administered → CRD → DTR → PAS. Self-administered → RTPB → F&B → NCPDP ePA. Both tracks share one question set, one decision, and one coded reason, so a drug that changes benefit is not re-asked
+- **Decision clocks** by program, with the citation on every decision: Medicaid's 24 hours plus a 72-hour emergency supply, the proposed QHP drug clocks, MA Part B and Part D, and no federal clock for commercial employer plans
+- **Drug PAs in the access APIs** (Patient Access, Provider Access, Payer-to-Payer) as PDex-shaped ExplanationOfBenefit resources, and a `/pharmacy` lookup so a dispensing pharmacy sees the same decision
+- **Versioned standards.** One IG registry drives the CapabilityStatement and a Standards tab with sunset markers. Patient Access moved to US Core 6.1.0, since 3.1.1 expired on January 1, 2026
+- **Reporting.** An endpoint report of base FHIR `Endpoint` resources, API usage with third-party error rates, and PA metrics as counts plus percentages
+- **CDex attachments** on pended requests, and a **clearinghouse** hop that rejects a nonconforming PAS Bundle before it reaches the payer
+
+The plan, the positions behind it, and the rule text each one ties to: [docs/cms-0062-p-implementation-plan.md](docs/cms-0062-p-implementation-plan.md).
+
 ## Touring the live demo
 
 The sandbox boots pre-seeded: the full rule index loads on first touch and a replayed demo session populates the live feed, the provider panel, and the patient portal, so every surface has data before the first click. After an idle period the first request may take a few seconds while the container wakes.
@@ -46,6 +59,13 @@ The sandbox boots pre-seeded: the full rule index loads on first touch and a rep
 3. `/um` Live Traffic Feed → expand the FHIR ↔ X12 drawer on the `X12 278 REQUEST` entry to inspect the field-to-segment mapping.
 4. `/patient` → the same determination appears in Jane Doe's history through the Patient Access API, alongside CARIN BB shaped claims.
 5. `/um` P2P Exchange → run `$member-match` for a newly enrolled member and retrieve the prior plan history as a FHIR Bundle.
+
+For the CMS-0062-P additions:
+
+1. `/ehr` → pick a certolizumab order, clinic-administered or self-administered, and leave the step therapy box unchecked. Then run the other one and watch the answers carry over and both tracks deny with the same reason.
+2. `/ehr` → select **Maria Santos** (Medicaid) or **David Kim** (QHP) and sign the default order to see the decision clock for that program.
+3. `/pharmacy` → look up Jane Doe and the certolizumab NDC.
+4. `/um` Standards and Registry & Metrics tabs.
 
 The **Reset demo** button in the `/um` header restores the seeded baseline at any time. A separate link resets to an empty index for walking through the PDF ingestion pipeline from a cold start.
 
@@ -65,6 +85,14 @@ The app serves under the `/cms-0057` base path everywhere, so the root URL inten
 
 ```powershell
 python -m pip install pdfplumber   # optional, enables live PDF extraction
+```
+
+Checks, against a running production build (`npm run build` then `npm start`):
+
+```powershell
+npm run regression        # API behavior, one section per phase
+npm run ui-smoke          # every surface in a real browser (needs npx playwright install chromium)
+node scripts/testElm.mjs  # the hand-authored MRI Brain ELM, no server needed
 ```
 
 Docker (includes Python, so the upload pipeline works):
@@ -105,24 +133,18 @@ This sandbox's own token endpoint signs with RS384 and publishes its public key 
 
 ## What I am building next
 
-CMS proposed a follow-on rule, [CMS-0062-P](https://www.federalregister.gov/documents/2026/04/14/2026-07205/medicare-and-medicaid-programs-patient-protection-and-affordable-care-act-interoperability-standards), on April 10, 2026. Comment period closed June 15, 2026; not yet finalized. It extends CMS-0057-F's prior authorization mandate to drugs and proposes FHIR, not X12, as the formal HIPAA standard for these transactions.
+The CMS-0062-P comment period closed June 15, 2026, and the rule is not final yet. If the final rule changes versions, dates, or clocks, the registry in `lib/fhir.js` and the clocks in `lib/decisionClock.js` are the places to update.
 
-**Already lines up with it,** because the conformance pass in this repo happened to land on the same IG versions the proposed rule names:
+The CMS-0062-P items that were on this list (drug PA on both benefits, drug decision clocks, the endpoint report, version-pinned profiles, and CDex attachments) are now built. See the section above.
 
-- **PAS profiles** — the response Bundle and ClaimResponse already claim Da Vinci PAS v2.2.1, the exact version cited
-- **CARIN BB EOBs** — `lib/eob.js` targets C4BB v2.2.0, also the exact version cited
-- **Endpoint reporting shape** — the CapabilityStatement and CDS discovery endpoints are the same shape as the endpoint-reporting requirement the proposed rule would add, though nothing here submits that information to a registry yet
+**Still on the roadmap:**
 
-**On the roadmap:**
-
-- **Drug-benefit PA path** — medical-benefit drugs via the existing FHIR API, pharmacy-benefit drugs via NCPDP, a separate transaction set this sandbox does not touch today
-- **Drug-specific decision timeframes** — roughly 24 hours expedited / 72 hours standard per the proposed rule, distinct from the illustrative 8-second review window used today
-- **Simulated FHIR endpoint registry** — an endpoint modeling the capability-statement reporting to CMS the proposed rule would require
-- **Version-pinned profile references** — explicit `|2.2.1`-style canonical URLs in place of the unpinned ones used today
-- **Da Vinci CDex attachments** — structured attachment exchange in place of the plain file upload the DTR pane accepts now
-- **Transaction log persistence** — carried over from before this conformance pass; the log, pending map, and committed rules reset on restart today
+- **Transaction log persistence.** The log, pending map, drug PA records, and metrics reset on restart today
 - **Bulk FHIR `$export`** — for the Payer-to-Payer history endpoint, in place of the synchronous searchset Bundle
 - **More agentic PDF ingestion** — an LLM classification pass over the text the parser already pulls, with the current pattern-matching extractor as a confidence-gated fallback
+- **An appeal flow**, so the appeal and overturn metrics carry real counts
+- **NCPDP cancel and appeal messages** on the pharmacy track, which the first cut left out
+- **Pharmacy-benefit PAs in the PDex profile**, if a future PDex version admits NDC codes. The current profile does not, which is recorded as a finding in [docs/conformance.md](docs/conformance.md)
 
 ## License
 

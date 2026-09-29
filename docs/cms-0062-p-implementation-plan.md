@@ -371,3 +371,22 @@ This phase extends position 5 beyond the Phase 1 transition view. Do this only a
 | 4. Verifiable compliance | 5, and the sandbox itself |
 | 5. FHIR PAS as a HIPAA standard, with a short, defined transition | 1 (transition view), 6 |
 | 6. Event notifications | Section 5 note only |
+
+---
+
+## 8. Build status
+
+Built on branch `cms-0062-p`, one commit per phase. Each phase went through adversarial review by Gemini 3.8 Flash and Gemini 3.1 Pro until both found no blocker or major issue, with `npm run regression` and `npm run ui-smoke` passing.
+
+| Phase | Commit | Notes |
+|---|---|---|
+| 0 Baseline fixes | `995060e` | Adds a real validation-error path (`AAA` only there) and `ClaimResponse.created` |
+| 1 Versions and dates | `ba1d92f` | Adds the two check scripts |
+| 2 One drug, two benefits | `ee13222` | Certolizumab in place of adalimumab (see Phase 2) |
+| 3 Decision clocks | `a8c5d52` | Adds the MA Part D clock for the MA pharmacy track |
+| 4 Access APIs and pharmacy | `6a3ef3f` | The NDC-coded pharmacy EOB does not claim the PDex PA profile, which only admits CPT, HCPCS, and HIPPS |
+| 5 Reporting and metrics | `c2eecdb` | PA metrics read a dedicated decision ledger, so the feed cap cannot drop them |
+| 6 CDex and intermediaries | `7dc73b6` | Built rather than left optional. A pend now waits for its attachment |
+| 7 US Core 6.1.0 | `f68ed98` | Added during the build: Patient Access claimed US Core 3.1.1, which expired from 170.215 on January 1, 2026 |
+
+A report-only super-review by Claude Opus 5.5 and Sonnet 5.5 followed the phases, in 11 rounds. Each round's confirmed findings were fixed in one commit (`e7dcc91` through `e12ed5a`), and rejected findings were written back with reasons. Rounds 9 to 11 found nothing above LOW from either reviewer. At the end, `npm run regression` had 291 checks, `npm run ui-smoke` 19 steps, and `node scripts/testElm.mjs` 12 cases.
