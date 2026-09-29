@@ -21,7 +21,15 @@ export async function POST() {
       { status: 500 }
     );
   }
-  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  let snapshot;
+  try {
+    snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return NextResponse.json({ error: 'pre-ingested rules file is unreadable' }, { status: 500 });
+  }
+  if (!Array.isArray(snapshot?.rules)) {
+    return NextResponse.json({ error: 'pre-ingested rules file has no rules array' }, { status: 500 });
+  }
   const db = getDb();
   db.rules = snapshot.rules;
   saveDb(db);
@@ -29,7 +37,7 @@ export async function POST() {
   logTransaction(
     'Ingestion Engine',
     'STATE COMMIT',
-    `Loaded ${snapshot.rules.length} pre-ingested rules (snapshot @ ${snapshot.generatedAt}). Sources: ${snapshot.perFile.map((p) => `${p.name} (${p.added})`).join(', ')}.`
+    `Loaded ${snapshot.rules.length} pre-ingested rules (snapshot @ ${snapshot.generatedAt}). Sources: ${(snapshot.perFile || []).map((p) => `${p.name} (${p.added})`).join(', ')}.`
   );
 
   return NextResponse.json({

@@ -25,7 +25,7 @@ const fetcher = (url) => fetch(url).then((r) => {
  */
 export default function RulesExplorer() {
   const { data, error, isLoading } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 15000 });
-  const rules = data?.rules || [];
+  const rules = useMemo(() => data?.rules || [], [data]);
 
   const [query, setQuery] = useState('');
   const [onlyPa, setOnlyPa] = useState(false);

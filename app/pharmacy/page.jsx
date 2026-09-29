@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { apiUrl } from '@/lib/basePath';
 import { authedFetch } from '@/lib/smartClient';
@@ -20,20 +20,24 @@ export default function PharmacyLookup() {
   const [ndc, setNdc] = useState(DEFAULT_NDC);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Bumped per lookup and per input change, so only the latest reply renders.
+  const reqRef = useRef(0);
 
   const lookup = async (e) => {
     e.preventDefault();
+    const mine = ++reqRef.current;
     setLoading(true);
     try {
       const res = await authedFetch(
         apiUrl(`/api/pharmacy/pa-status?memberId=${encodeURIComponent(memberId)}&ndc=${encodeURIComponent(ndc)}`),
         SCOPES
       );
-      setResult({ status: res.status, json: await res.json() });
+      const json = await res.json();
+      if (reqRef.current === mine) setResult({ status: res.status, json });
     } catch (err) {
-      setResult({ status: 0, json: { error: err.message } });
+      if (reqRef.current === mine) setResult({ status: 0, json: { error: err.message } });
     } finally {
-      setLoading(false);
+      if (reqRef.current === mine) setLoading(false);
     }
   };
 
@@ -57,7 +61,7 @@ export default function PharmacyLookup() {
           Member ID
           <select
             value={memberId}
-            onChange={(e) => { setMemberId(e.target.value); setResult(null); }}
+            onChange={(e) => { reqRef.current += 1; setLoading(false); setMemberId(e.target.value); setResult(null); }}
             className="block mt-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200"
           >
             {PATIENT_LIST.map((p) => (
@@ -69,7 +73,7 @@ export default function PharmacyLookup() {
           NDC
           <input
             value={ndc}
-            onChange={(e) => { setNdc(e.target.value); setResult(null); }}
+            onChange={(e) => { reqRef.current += 1; setLoading(false); setNdc(e.target.value); setResult(null); }}
             className="block mt-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200 w-40"
           />
         </label>

@@ -38,7 +38,9 @@ async function handlePOST(request) {
   // The attachment must come from the provider who asked. When the payer
   // knows the requester, ProviderId is required and must match.
   if (entry.npi && v.providerId !== entry.npi) {
-    return outcome(422, 'error', 'business-rule', `ProviderId ${v.providerId} is not the requester on ${v.trackingId}.`);
+    return outcome(422, 'error', 'business-rule', v.providerId
+      ? `ProviderId ${v.providerId} is not the requester on ${v.trackingId}.`
+      : `ProviderId is required for ${v.trackingId}, and must be the requester.`);
   }
   if ((entry.attachments || []).length + v.attachments.length > 20) {
     return outcome(422, 'error', 'too-costly', `At most 20 attachments per request.`);

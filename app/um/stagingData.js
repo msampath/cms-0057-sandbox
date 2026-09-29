@@ -44,7 +44,7 @@ const RULES_BH = [
 export const GRID_PATTERNS = [
   { matchers: [/(^|[-_ .])bh([-_ .]|$)/i, /behavioral/i, /mental.health/i], label: 'Behavioral Health', kind: 'bh', curated: RULES_BH },
   { matchers: [/specialty.*pharm/i, /pharmacy/i, /\bspecialty\b/i], label: 'Specialty Pharmacy', kind: 'pharm', curated: RULES_PHARM },
-  { matchers: [/\bmapa\b/i, /medicare.?advantage/i, /\bma[-_ ]/i, /[-_ ]ma\b/i], label: 'Medicare Advantage', kind: 'ma', curated: RULES_MA },
+  { matchers: [/(^|[-_ .])(ma|mapa)([-_ .]|$)/i, /medicare.?advantage/i], label: 'Medicare Advantage', kind: 'ma', curated: RULES_MA },
   { matchers: [/commercial.*med.*surg/i, /med.*surg/i, /commercial/i], label: 'Commercial Med-Surg', kind: 'medsurg', curated: RULES_MEDSURG }
 ];
 

@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { apiUrl, BASE_PATH } from '@/lib/basePath';
+import { apiUrl } from '@/lib/basePath';
 import { getPatient } from '@/lib/patients';
 import { PAS_PROFILES, readReviewAction, versionedCanonical, billingCodeSystem, PROFESSIONAL_CLAIM_TYPE } from '@/lib/fhir';
 import { buildSubmitAttachmentParameters } from '@/lib/cdex';
@@ -450,6 +450,9 @@ export default function EhrDashboard() {
   const pendedIdRef = useRef(null);
   // Bumped per PAS submit, so a slower Optum reply from an earlier submit is dropped.
   const optumPasReqRef = useRef(0);
+  // Bumped per Sign Order, so an earlier signing's Optum CRD or Availity
+  // reply cannot land on a later one.
+  const signReqRef = useRef(0);
   pendedIdRef.current = pendedId;
   // Route PAS through the simulated clearinghouse (conformance check), and
   // optionally claim an unsupported PAS version to see it rejected.
@@ -823,6 +826,8 @@ export default function EhrDashboard() {
     // newly-selected patient's just-reset state.
     const myVersion = scenarioVersionRef.current;
     const stillCurrent = () => scenarioVersionRef.current === myVersion;
+    const mySign = ++signReqRef.current;
+    const thisSign = () => stillCurrent() && signReqRef.current === mySign;
 
     const patient = buildPatientResource(scenario);
     const coverage = buildCoverageResource(scenario);
@@ -878,9 +883,9 @@ export default function EhrDashboard() {
         })
       })
         .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .then((result) => { if (stillCurrent()) setOptumOrderSign(result); })
-        .catch((err) => { if (stillCurrent()) setOptumOrderSign({ ok: false, json: { error: err.message } }); })
-        .finally(() => { if (stillCurrent()) setOptumOrderSignLoading(false); });
+        .then((result) => { if (thisSign()) setOptumOrderSign(result); })
+        .catch((err) => { if (thisSign()) setOptumOrderSign({ ok: false, json: { error: err.message } }); })
+        .finally(() => { if (thisSign()) setOptumOrderSignLoading(false); });
 
       // Availity Coverages: verify the patient has active eligibility at
       // the payer via a real clearinghouse call (X12 270/271). Fires
@@ -892,9 +897,9 @@ export default function EhrDashboard() {
         body: JSON.stringify({ patientId: patient.id })
       })
         .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .then((result) => { if (stillCurrent()) setAvailityResult(result); })
-        .catch((err) => { if (stillCurrent()) setAvailityResult({ ok: false, json: { error: err.message } }); })
-        .finally(() => { if (stillCurrent()) setAvailityLoading(false); });
+        .then((result) => { if (thisSign()) setAvailityResult(result); })
+        .catch((err) => { if (thisSign()) setAvailityResult({ ok: false, json: { error: err.message } }); })
+        .finally(() => { if (thisSign()) setAvailityLoading(false); });
     }
   };
 
@@ -2461,7 +2466,7 @@ function simulatedCqlResult(expression) {
 function buildQuestionnaireResponse(questionnaire, answers, patient) {
   const items = (questionnaire?.item || []).map((item) => {
     const v = answers[item.linkId];
-    const ans = answerByType(item.type, v);
+    const ans = answerByType(item.type, v, item);
     return {
       linkId: item.linkId,
       text: item.text,
@@ -2479,7 +2484,7 @@ function buildQuestionnaireResponse(questionnaire, answers, patient) {
   };
 }
 
-function answerByType(type, value) {
+function answerByType(type, value, item) {
   if (value === undefined || value === null || value === '') return null;
   switch (type) {
     case 'boolean':
@@ -2490,8 +2495,11 @@ function answerByType(type, value) {
       return { valueString: String(value) };
     case 'text':
       return { valueString: String(value) };
-    case 'choice':
-      return { valueCoding: { code: String(value) } };
+    case 'choice': {
+      // The Questionnaire's own answerOption coding, so the response matches it.
+      const option = (item?.answerOption || []).find((o) => o?.valueCoding?.code === String(value));
+      return { valueCoding: option ? option.valueCoding : { code: String(value) } };
+    }
     default:
       return { valueString: String(value) };
   }

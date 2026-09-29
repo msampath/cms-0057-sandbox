@@ -28,10 +28,10 @@ const DEFAULT_ISS = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4';
 function clientIdFor(iss, epicVariant) {
   try {
     const host = new URL(iss).host;
-    if (host === EPIC_HOST && epicVariant && EPIC_CLIENTS[epicVariant]) {
+    if (host === EPIC_HOST && epicVariant && Object.hasOwn(EPIC_CLIENTS, epicVariant)) {
       return EPIC_CLIENTS[epicVariant];
     }
-    return CLIENT_ID_BY_HOST[host] || DEFAULT_CLIENT_ID;
+    return Object.hasOwn(CLIENT_ID_BY_HOST, host) ? CLIENT_ID_BY_HOST[host] : DEFAULT_CLIENT_ID;
   } catch {
     return DEFAULT_CLIENT_ID;
   }

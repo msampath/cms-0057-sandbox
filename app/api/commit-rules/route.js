@@ -4,8 +4,11 @@ import { NextResponse } from 'next/server';
 import { bodyTooLarge } from '@/lib/bodyLimit';
 import { getDb, saveDb, logTransaction } from '@/lib/db';
 
+// A rule is one grid's answer for one code or category. The same code can
+// sit on the MA and the commercial grids with different answers, so the
+// grid (source_label) is part of the key.
 const keyOf = (r) =>
-  `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`;
+  `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}|${r.source_label || ''}`;
 
 const PREINGESTED_PATH = path.join(process.cwd(), 'data', 'preIngestedRules.json');
 
@@ -21,7 +24,7 @@ const PREINGESTED_PATH = path.join(process.cwd(), 'data', 'preIngestedRules.json
  * via the "Use previously ingested rules" button picks up everything
  * that has ever been committed.
  *
- * Match key: match_type + service_code + service_category. First-seen
+ * Match key: match_type + service_code + service_category + source_label. First-seen
  * rule wins for any conflicting key; subsequent commits with the same
  * key are no-ops at the data level (but logged).
  */
@@ -177,7 +180,9 @@ export async function POST(request) {
       totalRules: snapByKey.size,
       rules: Array.from(snapByKey.values())
     };
-    fs.writeFileSync(PREINGESTED_PATH, JSON.stringify(newSnap, null, 2));
+    // Write then rename, so a crash mid-write cannot leave a partial snapshot.
+    fs.writeFileSync(`${PREINGESTED_PATH}.tmp`, JSON.stringify(newSnap, null, 2));
+    fs.renameSync(`${PREINGESTED_PATH}.tmp`, PREINGESTED_PATH);
     snapshotCount = newSnap.totalRules;
   } catch (e) {
     // If snapshot write fails, the active DB is still updated. Surface

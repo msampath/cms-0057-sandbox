@@ -111,9 +111,10 @@ export async function handlePOST(request) {
   // Each Claim item becomes a ClaimResponse item, so the count is bounded.
   const items = claim?.item;
   if (items !== undefined && (!Array.isArray(items) || items.length > 50 ||
-      !items.every((it) => it && typeof it === 'object' && (it.sequence === undefined || (Number.isInteger(it.sequence) && it.sequence > 0))))) {
+      !items.every((it) => it && typeof it === 'object' && Number.isInteger(it.sequence) && it.sequence > 0) ||
+      new Set(items.map((it) => it.sequence)).size !== items.length)) {
     return NextResponse.json(
-      { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'value', diagnostics: 'Claim.item must be an array of at most 50 items with positive integer sequences.' }] },
+      { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'value', diagnostics: 'Claim.item must be an array of at most 50 items, each with a unique positive integer sequence.' }] },
       { status: 400 }
     );
   }
@@ -128,6 +129,10 @@ export async function handlePOST(request) {
   const coverageId = str(coverage?.id) || getPatient(patient?.id)?.coverageId || null;
   // Every decision log carries the requesting NPI, so Provider Access shows
   // item PAs as well as CRD events.
+  // An entry identified only by fullUrl is referenced by that fullUrl.
+  const patientRef = patient?.id
+    ? `Patient/${patient.id}`
+    : (Array.isArray(bundle?.entry) ? bundle.entry : []).find((e) => e?.resource === patient && typeof e.fullUrl === 'string' && e.fullUrl.length <= 200)?.fullUrl || 'Patient/unknown';
   const logMeta = {
     patientId: patient?.id || 'unknown',
     npi: practitionerNpiOf(bundle) || getPatient(patient?.id)?.npi || null
@@ -227,12 +232,14 @@ export async function handlePOST(request) {
   const drugReason = drugDecision?.reasonKey ? DRUG_DENIAL_REASONS[drugDecision.reasonKey] : null;
   // Only a submission that carries DTR answers is a decision by the shared
   // model. A forced debug denial (_simulateDenial), or a Bundle with no
-  // QuestionnaireResponse answers, is recorded on the medical track so the EHR card
-  // and the record agree, but it does not change the shared determination
-  // or answers.
+  // QuestionnaireResponse answers, does not change the shared determination
+  // or answers. On a track that already holds a model decision it is kept as
+  // lastAttempt beside that decision. Otherwise it is recorded on the track,
+  // flagged, and the access APIs leave it out.
   const noDrugAnswers = !!drugKey && !(drugAnswers && Object.keys(drugAnswers).length > 0);
   const recordDrugDecision = (authNumber, { forced = false } = {}) => {
-    if (!drugKey) return;
+    // A Patient with no id has no record key, so no shared record is kept.
+    if (!drugKey || !patient?.id) return;
     const hasAnswers = !!drugAnswers && Object.keys(drugAnswers).length > 0;
     const npi = logMeta.npi;
     const modelDecision = !forced && hasAnswers;
@@ -281,7 +288,7 @@ export async function handlePOST(request) {
       status: 'active',
       type: claimType,
       use: 'preauthorization',
-      patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+      patient: { reference: patientRef },
       created: new Date().toISOString(),
       outcome: 'complete',
       disposition: drugReason
@@ -356,7 +363,7 @@ export async function handlePOST(request) {
       status: 'active',
       type: claimType,
       use: 'preauthorization',
-      patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+      patient: { reference: patientRef },
       created: new Date().toISOString(),
       // PAS binds outcome to complete | error | partial. A pend is a
       // completed adjudication whose review action is A4.
@@ -417,8 +424,8 @@ export async function handlePOST(request) {
       authNumber,
       patient: {
         memberId: member?.subscriberId || patient?.id || 'unknown',
-        family: member?.family || patient?.name?.[0]?.family || 'Unknown',
-        given: member?.given || patient?.name?.[0]?.given || []
+        family: member?.family || (typeof patient?.name?.[0]?.family === 'string' ? patient.name[0].family.slice(0, 60) : 'Unknown'),
+        given: member?.given || (Array.isArray(patient?.name?.[0]?.given) ? patient.name[0].given.filter((g) => typeof g === 'string').slice(0, 3).map((g) => g.slice(0, 35)) : [])
       },
       practitionerNpi,
       payerUrl: `${apiBase(request)}/cdex/$submit-attachment`,
@@ -467,7 +474,7 @@ export async function handlePOST(request) {
     status: 'active',
     type: claimType,
     use: 'preauthorization',
-    patient: { reference: `Patient/${patient?.id || 'unknown'}` },
+    patient: { reference: patientRef },
     created: new Date().toISOString(),
     outcome: 'complete',
     disposition: `Prior Authorization Approved by ${vendor}.`,

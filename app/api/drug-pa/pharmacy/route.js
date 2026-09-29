@@ -41,7 +41,7 @@ async function handlePOST(request) {
   const receivedAt = step === 'submit' && knownCase ? opened.receivedAt : new Date().toISOString();
   const ID = /^[A-Za-z0-9._-]{1,64}$/;
   const drug = typeof drugKey === 'string' && Object.hasOwn(DRUG_CATALOG, drugKey) ? DRUG_CATALOG[drugKey] : null;
-  if (!drug || typeof patientId !== 'string' || !ID.test(patientId) || !['benefit', 'submit'].includes(step)) {
+  if (!drug || typeof patientId !== 'string' || !/^[A-Za-z0-9.-]{1,64}$/.test(patientId) || patientId === 'unknown' || !['benefit', 'submit'].includes(step)) {
     return NextResponse.json(
       { error: 'step (benefit|submit), a known drugKey, and patientId are required' },
       { status: 400 }

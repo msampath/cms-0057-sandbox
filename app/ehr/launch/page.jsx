@@ -22,7 +22,8 @@ const DEFAULT_CLIENT_ID = 'cms-0057-sandbox-public';
 
 function clientIdFor(iss) {
   try {
-    return CLIENT_ID_BY_HOST[new URL(iss).host] || DEFAULT_CLIENT_ID;
+    const host = new URL(iss).host;
+    return Object.hasOwn(CLIENT_ID_BY_HOST, host) ? CLIENT_ID_BY_HOST[host] : DEFAULT_CLIENT_ID;
   } catch {
     return DEFAULT_CLIENT_ID;
   }

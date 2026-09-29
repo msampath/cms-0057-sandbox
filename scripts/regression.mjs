@@ -11,6 +11,21 @@
 
 const BASE = (process.env.BASE_URL || 'http://localhost:3000/cms-0057').replace(/\/$/, '');
 const REVIEW_ACTION = 'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/extension-reviewAction';
+import http from 'node:http';
+
+// A raw POST with neither Content-Length nor Transfer-Encoding (fetch always
+// sends one of them).
+function rawPostNoBody(path) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(BASE + path);
+    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST' }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 let failures = 0;
 let passes = 0;
@@ -825,17 +840,32 @@ async function hardening() {
   check('a chunked body (no Content-Length) → 411', chunked.status === 411, String(chunked.status));
   const chunkedRules = await fetch(BASE + '/api/commit-rules', {
     method: 'POST',
-    body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('[]')); c.close(); } }),
+    // An invalid rule, so a regressed guard gets a 400 and never writes the snapshot.
+    body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('[{"match_type":"bogus"}]')); c.close(); } }),
     duplex: 'half'
   });
   check('commit-rules refuses a chunked body too → 411', chunkedRules.status === 411, String(chunkedRules.status));
-  check('no-token POST with no body still gets 401 first', (await fetch(BASE + '/api/payer-to-payer/member-match', { method: 'POST' })).status === 401);
+  check('no-token POST with no body headers at all still gets 401 first', (await rawPostNoBody('/api/payer-to-payer/member-match')) === 401);
   const manyItems = pasBundle('70553');
   manyItems.entry[1].resource.item = Array.from({ length: 51 }, (_, i) => ({ sequence: i + 1, productOrService: { coding: [{ code: '70553' }] } }));
   check('PAS with more than 50 Claim items → 400', (await post('/api/pas/submit', manyItems)).status === 400);
   const noId = pasBundle('70553');
   delete noId.entry[0].resource.id;
-  check('PAS Patient identified only by fullUrl (no id) is accepted', (await post('/api/pas/submit', noId)).status === 200);
+  noId.entry[0].fullUrl = 'urn:uuid:3f2a6c1e-0000-4000-8000-000000000001';
+  const noIdRes = await post('/api/pas/submit', noId);
+  check('PAS Patient identified only by fullUrl is accepted and referenced by it',
+    noIdRes.status === 200 && noIdRes.json?.entry?.[0]?.resource?.patient?.reference === 'urn:uuid:3f2a6c1e-0000-4000-8000-000000000001');
+  const noSeq = pasBundle('70553');
+  noSeq.entry[1].resource.item = [{ sequence: 2, productOrService: { coding: [{ code: '70553' }] } }, { productOrService: { coding: [{ code: '70553' }] } }];
+  check('PAS Claim items need unique positive sequences → 400', (await post('/api/pas/submit', noSeq)).status === 400);
+  const bigType = pasBundle('15820', {}, 'MA-PPO');
+  bigType.entry[1].resource.type = { coding: [{ system: 'x', code: 'professional', display: 'd'.repeat(5000) }] };
+  const bigTypeCr = (await post('/api/pas/submit', bigType)).json?.entry?.[0]?.resource;
+  check('Claim.type is echoed only as bounded strings', JSON.stringify(bigTypeCr?.type || {}).length < 300 && bigTypeCr?.type?.coding?.[0]?.code === 'professional');
+  const notPdf = new FormData();
+  notPdf.append('file', new Blob(['hello, not a pdf'], { type: 'application/pdf' }), '2026-commercial-bh-pa-code-list.pdf');
+  check('extract rejects a file that is not a PDF → 422', (await fetch(BASE + '/api/extract', { method: 'POST', body: notPdf })).status === 422);
+  check('pharmacy track refuses the placeholder patient id "unknown" → 400', (await post('/api/drug-pa/pharmacy', { step: 'benefit', drugKey: 'certolizumab', patientId: 'unknown' })).status === 400);
   const longName = pasBundle('77301');
   longName.entry[0].resource.name = [{ family: 'F'.repeat(100), given: ['G'.repeat(100)] }];
   await post('/api/pas/submit', longName);

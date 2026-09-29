@@ -238,6 +238,15 @@ export function SharedRecord({ record }) {
           {t.ndc && <> · NDC {t.ndc}</>}
           {t.authNumber && <> · auth {t.authNumber}</>}
           {t.caseId && <> · case {t.caseId}</>}
+          {t.lastAttempt && (
+            <div className="ml-3 text-gray-600">
+              Later attempt: {t.lastAttempt.determination}
+              {t.lastAttempt.debugForced ? ' (debug flag)' : ' (no answers)'}
+              {t.lastAttempt.authNumber && <> · auth {t.lastAttempt.authNumber}</>}
+              {t.lastAttempt.caseId && <> · case {t.lastAttempt.caseId}</>}
+              . Not a model decision, so the decision above stands.
+            </div>
+          )}
         </div>
       ))}
     </div>

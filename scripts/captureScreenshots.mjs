@@ -33,7 +33,8 @@ async function main() {
   }
 
   // Deterministic baseline: snapshot rules + replayed demo traffic.
-  await fetch(`${BASE}/api/demo/reset?mode=seeded`, { method: 'POST' });
+  const reset = await fetch(`${BASE}/api/demo/reset?mode=seeded`, { method: 'POST' });
+  if (!reset.ok) throw new Error(`demo reset failed: HTTP ${reset.status}`);
 
   mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { apiUrl } from '@/lib/basePath';
 import {
   pickPatternForFile,
-  buildStagedRules,
   buildExceptions,
   summarize,
   groupBySource,
@@ -26,6 +25,9 @@ const fetcher = (url) => fetch(url).then((r) => {
 });
 
 const CODE_SHAPE = /^(\d{5}|\d{4}[A-Z]|[A-Z]\d{4})$/;
+// Same identity as /api/commit-rules: one grid's answer for one code or category.
+const ruleKey = (r) => `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}|${r.source_label || ''}`;
+const hasCodeShape = (r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || ''));
 function codeValidityPct(rules) {
   if (!rules.length) return 0;
   const valid = rules.filter((r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || ''))).length;
@@ -99,28 +101,30 @@ export default function UmDashboard() {
       }
     }
 
-    // Cross-file dedupe for the merged commit set
-    const byKey = new Map();
+    // Cross-file dedupe for the merged commit set. Each file's own and
+    // duplicate rules are counted against the files before it.
+    const byKey = new Set();
     const rules = [];
-    for (const r of allRules) {
-      const k = `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`;
-      if (!byKey.has(k)) { byKey.set(k, true); rules.push(r); }
+    for (const p of perFile) {
+      p.ownRules = [];
+      p.dupRules = [];
+      for (const r of p.allRules) {
+        const k = ruleKey(r);
+        if (byKey.has(k)) { p.dupRules.push(r); continue; }
+        byKey.add(k);
+        p.ownRules.push(r);
+        rules.push(r);
+      }
     }
 
     const totalExtracted = perFile.reduce((n, p) => n + p.allRules.length, 0);
     const current = await fetch(apiUrl('/api/rules')).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    const activeKeys = new Set(
-      ((current || rulesData)?.rules || []).map(
-        (r) => `${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`
-      )
-    );
-    const newCount = rules.filter((r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || ''))).reduce(
-      (n, r) =>
-        activeKeys.has(`${r.match_type}|${r.service_code || ''}|${r.service_category || ''}`)
-          ? n
-          : n + 1,
-      0
-    );
+    const activeKeys = new Set(((current || rulesData)?.rules || []).map(ruleKey));
+    // Rules without a CPT or HCPCS shaped code are left out of the commit,
+    // so they are counted apart, not as new or already present.
+    const committable = rules.filter(hasCodeShape);
+    const newCount = committable.filter((r) => !activeKeys.has(ruleKey(r))).length;
+    const skipped = rules.length - committable.length;
 
     const baseExceptions = buildExceptions(rules, files);
     const allExceptions = [
@@ -137,7 +141,7 @@ export default function UmDashboard() {
       rules,
       perFile,
       exceptions: allExceptions,
-      diff: { newCount, alreadyPresent: rules.length - newCount, activeBefore: activeKeys.size },
+      diff: { newCount, alreadyPresent: committable.length - newCount, skipped, activeBefore: activeKeys.size },
       extractionErrors: errors
     });
   };
@@ -153,7 +157,7 @@ export default function UmDashboard() {
     if (committing) return;
     setCommitting(true);
     // Code rules that fail the code-shape check are left out of the commit.
-    const toCommit = staging.rules.filter((r) => r.match_type !== 'code' || CODE_SHAPE.test(String(r.service_code || '')));
+    const toCommit = staging.rules.filter(hasCodeShape);
     const res = await fetch(apiUrl('/api/commit-rules'), { method: 'POST', body: JSON.stringify(toCommit) }).catch(() => null);
     if (!res?.ok) {
       const json = await res?.json().catch(() => null);
@@ -218,7 +222,7 @@ export default function UmDashboard() {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <ResetDemoButton onReset={() => setStaging(null)} />
+          <ResetDemoButton onReset={() => setStaging(null)} blocked={isProcessing || committing} />
           <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded">SYSTEM: ONLINE</span>
         </div>
       </div>
@@ -263,7 +267,7 @@ export default function UmDashboard() {
               rules against the {ruleCount} already in active CRD memory.
             </p>
             <PreIngestedButton ruleCount={ruleCount} />
-            <EmptyStateResetLink onReset={() => setStaging(null)} />
+            <EmptyStateResetLink onReset={() => setStaging(null)} blocked={isProcessing || committing} />
           </div>
         )}
 
@@ -390,7 +394,7 @@ export default function UmDashboard() {
   );
 }
 
-function ResetDemoButton({ onReset }) {
+function ResetDemoButton({ onReset, blocked = false }) {
   const [busy, setBusy] = useState(false);
   const reset = async () => {
     if (
@@ -415,7 +419,7 @@ function ResetDemoButton({ onReset }) {
     <button
       type="button"
       onClick={reset}
-      disabled={busy}
+      disabled={busy || blocked}
       className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1 rounded disabled:opacity-50"
       title="Restore snapshot rules and replayed demo traffic"
     >
@@ -424,7 +428,7 @@ function ResetDemoButton({ onReset }) {
   );
 }
 
-function EmptyStateResetLink({ onReset }) {
+function EmptyStateResetLink({ onReset, blocked = false }) {
   const [busy, setBusy] = useState(false);
   const resetEmpty = async () => {
     if (
@@ -449,7 +453,7 @@ function EmptyStateResetLink({ onReset }) {
     <button
       type="button"
       onClick={resetEmpty}
-      disabled={busy}
+      disabled={busy || blocked}
       className="mt-2 text-xs text-gray-400 hover:text-gray-200 underline disabled:opacity-50"
     >
       {busy ? 'Clearing…' : 'Reset to an empty index (for the upload walkthrough)'}
@@ -539,10 +543,10 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extra
             e.target.value = '';
             setFiles((prev) => {
               const incoming = picked;
-              const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+              const seen = new Set(prev.map((f) => `${f.name}:${f.size}:${f.lastModified}`));
               const merged = [...prev];
               for (const f of incoming) {
-                const key = `${f.name}:${f.size}`;
+                const key = `${f.name}:${f.size}:${f.lastModified}`;
                 if (!seen.has(key)) {
                   merged.push(f);
                   seen.add(key);
@@ -667,7 +671,10 @@ function StagingReview({ staging, metrics, perSource, onCommit, committing = fal
           </div>
           <div className="text-[11px] text-gray-400 mt-2">
             Commit merges staged rules into active memory. Only the {staging.diff.newCount} new
-            rule{staging.diff.newCount === 1 ? '' : 's'} will be added; the rest are already known.
+            rule{staging.diff.newCount === 1 ? '' : 's'} will be added. The rest are already known.
+            {staging.diff.skipped > 0 && (
+              <> {staging.diff.skipped} code rule{staging.diff.skipped === 1 ? '' : 's'} without a CPT or HCPCS shaped code will be left out.</>
+            )}
           </div>
         </div>
       )}

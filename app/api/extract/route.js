@@ -26,7 +26,7 @@ import { runPython } from '@/lib/python';
 const KIND_MATCHERS = [
   { re: /(^|[-_ .])bh([-_ .]|$)|behavioral|mental.health/i,                    kind: 'bh',      label: 'Behavioral Health' },
   { re: /specialty.*pharm|pharmacy|\bspecialty\b/i,            kind: 'pharm',   label: 'Specialty Pharmacy' },
-  { re: /\bmapa\b|medicare.?advantage|\bma[-_ ]|[-_ ]ma\b/i,   kind: 'ma',      label: 'Medicare Advantage' },
+  { re: /(^|[-_ .])(ma|mapa)([-_ .]|$)|medicare.?advantage/i,   kind: 'ma',      label: 'Medicare Advantage' },
   { re: /commercial.*med.*surg|med.*surg|commercial/i,         kind: 'medsurg', label: 'Commercial Med-Surg' }
 ];
 
@@ -95,6 +95,10 @@ async function extract(form) {
 
   // Save to temp file
   const buf = Buffer.from(await file.arrayBuffer());
+  // Only a PDF goes to pdfplumber. Anything else is the caller's error.
+  if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    return NextResponse.json({ error: 'the upload is not a PDF' }, { status: 422 });
+  }
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-extract-'));
   const pdfPath = path.join(tmpDir, 'upload.pdf');
   try {
@@ -117,6 +121,9 @@ async function extract(form) {
       result = await runPython(scriptPath, [matched.kind, pdfPath, outPath]);
     } catch (e) {
       logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', String(e.message || e));
+      if (/timed out/.test(String(e.message))) {
+        return NextResponse.json({ error: 'the extractor timed out on this file' }, { status: 504 });
+      }
       return NextResponse.json({
         error: 'failed to run python extractor',
         hint: 'install Python 3 and pdfplumber: pip install pdfplumber',
@@ -125,7 +132,7 @@ async function extract(form) {
     }
 
     if (result.code !== 0) {
-      logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', `exit ${result.code}: ${result.stderr.slice(0, 300)}`);
+      logTransaction('Ingestion Engine', 'LIVE EXTRACT FAIL', `exit ${result.code}: ${result.stderr.slice(-300)}`);
       return NextResponse.json({
         error: 'extractor exited non-zero',
         exitCode: result.code,
