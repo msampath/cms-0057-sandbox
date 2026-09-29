@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { NextResponse } from 'next/server';
 import { logTransaction } from '@/lib/db';
+import { withUsage } from '@/lib/withUsage';
 
 /**
  * GET /api/cql/[id]
@@ -10,7 +11,7 @@ import { logTransaction } from '@/lib/db';
  * wrapper with the CQL text in `content[0].data` (base64). The DTR Glass Box
  * surfaces this in the Developer View pane alongside the Questionnaire JSON.
  */
-export async function GET(_request, { params }) {
+async function handleGET(_request, { params }) {
   const { id } = params;
 
   if (!/^[a-z0-9_-]+$/i.test(id)) {
@@ -50,3 +51,5 @@ export async function GET(_request, { params }) {
   logTransaction('DTR Gateway', 'CQL SERVED', `Served Library/${id} (${cql.split('\n').length} lines).`);
   return NextResponse.json(library);
 }
+
+export const GET = withUsage('Prior Authorization', handleGET);

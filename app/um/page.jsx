@@ -41,7 +41,7 @@ export default function UmDashboard() {
   // SWR dedupes by key — both this and <RulesExplorer> share the same
   // cached response, no double fetch. The full rule set is large, so it is
   // polled slowly and revalidated right after a commit, load, or reset.
-  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: 15000 });
+  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: tab === 'rules' ? 15000 : 0 });
   const ruleCount = rulesData?.rules?.length ?? 0;
   // One-shot probe: can this host run the Python extractor? Undefined while
   // loading is treated as available so the form does not flash disabled.
@@ -79,7 +79,7 @@ export default function UmDashboard() {
         const fd = new FormData();
         fd.append('file', f);
         const res = await fetch(apiUrl('/api/extract'), { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {
           errors.push({ name: f.name, error: data.error || `HTTP ${res.status}`, hint: data.hint });
           perFile.push({ source_file: f.name, source_label: 'extraction failed', matched: false, allRules: [], ownRules: [], dupRules: [] });
@@ -556,7 +556,7 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extra
             });
           }}
           className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-gray-700 file:text-gray-200"
-          accept=".pdf,.csv"
+          accept=".pdf"
         />
         <button
           type="submit"
@@ -564,8 +564,8 @@ function UploadForm({ files, setFiles, removeFile, onSubmit, isProcessing, extra
           className="bg-blue-600 px-4 py-2 rounded text-white font-bold disabled:opacity-50 whitespace-nowrap"
         >
           {isProcessing
-            ? 'LLM Parsing…'
-            : `Extract Rules (LLM)${files.length > 0 ? ` — ${files.length} file${files.length === 1 ? '' : 's'}` : ''}`}
+            ? 'Parsing PDF…'
+            : `Extract rules (pdfplumber)${files.length > 0 ? ` — ${files.length} file${files.length === 1 ? '' : 's'}` : ''}`}
         </button>
       </div>
 

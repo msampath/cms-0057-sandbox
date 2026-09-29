@@ -11,19 +11,25 @@
 
 const BASE = (process.env.BASE_URL || 'http://localhost:3000/cms-0057').replace(/\/$/, '');
 const REVIEW_ACTION = 'http://hl7.org/fhir/us/davinci-pas/StructureDefinition/extension-reviewAction';
-import http from 'node:http';
+import net from 'node:net';
+import tls from 'node:tls';
 
-// A raw POST with neither Content-Length nor Transfer-Encoding (fetch always
-// sends one of them).
+// A raw POST with neither Content-Length nor Transfer-Encoding. fetch and
+// http.request always send one of them, so this writes the request by hand.
 function rawPostNoBody(path) {
   return new Promise((resolve, reject) => {
     const u = new URL(BASE + path);
-    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST' }, (res) => {
-      res.resume();
-      res.on('end', () => resolve(res.statusCode));
+    const secure = u.protocol === 'https:';
+    const port = Number(u.port) || (secure ? 443 : 80);
+    const sock = secure ? tls.connect({ host: u.hostname, port, servername: u.hostname }) : net.connect({ host: u.hostname, port });
+    let data = '';
+    sock.setTimeout(10000, () => { sock.destroy(); reject(new Error('timeout')); });
+    sock.on(secure ? 'secureConnect' : 'connect', () => {
+      sock.write(`POST ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.host}\r\nConnection: close\r\n\r\n`);
     });
-    req.on('error', reject);
-    req.end();
+    sock.on('data', (d) => { data += d.toString('latin1'); });
+    sock.on('end', () => resolve(Number((data.match(/^HTTP\/1\.[01] (\d{3})/) || [])[1] || 0)));
+    sock.on('error', reject);
   });
 }
 
@@ -280,6 +286,7 @@ async function phase2() {
   const rec3 = (await call(`/api/drug-pa/record?patientId=${pid2}&drugKey=certolizumab`)).json?.record;
   check('debug denial returns A3 but keeps the earlier model decision on the record',
     review(forced)?.action === 'A3' && rec3?.tracks?.medical?.determination === 'approved' && !rec3?.tracks?.medical?.debugForced && rec3?.determination === 'approved');
+  check('the forced attempt is kept as lastAttempt beside the decision', rec3?.tracks?.medical?.lastAttempt?.debugForced === true);
   // A PAS Bundle with no QuestionnaireResponse must not wipe the answers.
   const noQr = drugPasBundle(pid2, {});
   noQr.entry = noQr.entry.filter((e) => e.resource.resourceType !== 'QuestionnaireResponse');
@@ -288,6 +295,7 @@ async function phase2() {
   check('empty answer set does not wipe stored answers', JSON.stringify(rec4?.answers) === JSON.stringify(ok), JSON.stringify(rec4?.answers));
   check('empty answer set does not flip the shared determination or the track decision',
     rec4?.determination === 'approved' && rec4?.tracks?.medical?.determination === 'approved' && !rec4?.tracks?.medical?.noAnswers, JSON.stringify(rec4?.tracks?.medical));
+  check('the answerless attempt is kept as lastAttempt', rec4?.tracks?.medical?.lastAttempt?.noAnswers === true);
 
   // Second denial branch: TB screening missing → 886 code 0U on both tracks.
   const pid3 = `pat-reg-${Date.now()}-c`;
@@ -677,6 +685,9 @@ async function hardening() {
   const PA = '/api/patient-access?patientId=pat-8849-jane-doe';
   const auth = (t) => ({ headers: { authorization: 'Bearer ' + t } });
   check('good token → 200 (positive control)', (await call(PA, auth(pTok))).status === 200);
+  const wwwAuth = async (init) => (await fetch(BASE + PA.replace('/api', '/api'), init)).headers.get('www-authenticate') || '';
+  check('no-token 401 WWW-Authenticate has no error attribute', !/error=/.test(await wwwAuth({})));
+  check('bad-token 401 WWW-Authenticate says invalid_token', /error="invalid_token"/.test(await wwwAuth(auth('a.b.c'))));
   check('tampered payload → 401', (await call(PA, auth(tampered))).status === 401);
   const none = [b64({ alg: 'none', typ: 'JWT' }), tampered.split('.')[1], ''].join('.');
   check('alg none → 401', (await call(PA, auth(none))).status === 401);
@@ -685,6 +696,7 @@ async function hardening() {
   check('header that decodes to null → 401, not 500', (await call(PA, auth('bnVsbA.a.b'))).status === 401);
   const sTok = await token(['system/Patient.read', 'system/ExplanationOfBenefit.read', 'system/ClaimResponse.read']);
   check('patient-scoped token on Provider Access → 403', (await call('/api/provider-access?npi=1234567890', auth(pTok))).status === 403);
+  check('403 WWW-Authenticate says insufficient_scope', /error="insufficient_scope"/.test((await fetch(BASE + '/api/provider-access?npi=1234567890', auth(pTok))).headers.get('www-authenticate') || ''));
   check('Provider Access without a token → 401', (await call('/api/provider-access?npi=1234567890')).status === 401);
   const pv = (await call('/api/provider-access?npi=1234567890', auth(sTok))).json;
   check('Provider Access panel is not empty for the demo NPI', (pv?.patients || []).length > 0);
@@ -857,7 +869,20 @@ async function hardening() {
     noIdRes.status === 200 && noIdRes.json?.entry?.[0]?.resource?.patient?.reference === 'urn:uuid:3f2a6c1e-0000-4000-8000-000000000001');
   const noSeq = pasBundle('70553');
   noSeq.entry[1].resource.item = [{ sequence: 2, productOrService: { coding: [{ code: '70553' }] } }, { productOrService: { coding: [{ code: '70553' }] } }];
-  check('PAS Claim items need unique positive sequences → 400', (await post('/api/pas/submit', noSeq)).status === 400);
+  check('PAS Claim items need a sequence → 400', (await post('/api/pas/submit', noSeq)).status === 400);
+  const dupSeq = pasBundle('70553');
+  dupSeq.entry[1].resource.item = [{ sequence: 1, productOrService: { coding: [{ code: '70553' }] } }, { sequence: 1, productOrService: { coding: [{ code: '70553' }] } }];
+  check('PAS Claim items need unique sequences → 400', (await post('/api/pas/submit', dupSeq)).status === 400);
+  const zeroSeq = pasBundle('70553');
+  zeroSeq.entry[1].resource.item = [{ sequence: 0, productOrService: { coding: [{ code: '70553' }] } }];
+  check('PAS Claim item sequence 0 → 400', (await post('/api/pas/submit', zeroSeq)).status === 400);
+  const noIdOrder = noIdRes.json?.entry?.map((e) => e.resource).find((r) => r?.resourceType === 'ServiceRequest');
+  check('the fullUrl reference is used for the order subject too', noIdOrder?.subject?.reference === 'urn:uuid:3f2a6c1e-0000-4000-8000-000000000001');
+  const noIdDrug = drugPasBundle('x', { diagnosis: 'K50.90', 'conventional-therapy-failed': true, 'tb-screen-negative': true });
+  delete noIdDrug.entry[0].resource.id;
+  await post('/api/pas/submit', noIdDrug);
+  check('a J0717 Bundle with an id-less Patient keeps no shared record under "unknown"',
+    !(await call('/api/drug-pa/record?patientId=unknown&drugKey=certolizumab')).json?.record);
   const bigType = pasBundle('15820', {}, 'MA-PPO');
   bigType.entry[1].resource.type = { coding: [{ system: 'x', code: 'professional', display: 'd'.repeat(5000) }] };
   const bigTypeCr = (await post('/api/pas/submit', bigType)).json?.entry?.[0]?.resource;

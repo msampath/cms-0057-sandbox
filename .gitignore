@@ -47,3 +47,6 @@ v2_implementation_notes.md
 
 # Diffs staged for the agy review loop, deleted before each commit
 .review/
+
+# Temp files from atomic JSON writes (lib/db.js, commit-rules)
+*.json.tmp

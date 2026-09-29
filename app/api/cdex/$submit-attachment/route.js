@@ -63,7 +63,7 @@ async function handlePOST(request) {
     `$submit-attachment for Auth # ${v.trackingId}: ${v.attachments.length} attachment(s) (${v.attachments.map((a) => `LOINC ${a.code || '-'} as ${a.contentType}`).join(', ')}). ${
       v.final ? 'Final submission: the request re-enters clinical review.' : 'Not final: more attachments expected.'
     }`,
-    { patientId: entry.patientId }
+    { patientId: entry.patientId, npi: entry.npi || null }
   );
 
   return outcome(

@@ -14,6 +14,7 @@ import {
   REVIEW_REASONS,
   X12_REJECT_REASONS,
   claimTypeOf,
+  textOf,
   claimResponseItems,
   coverageInformationOrder,
   pasErrorClaimResponse,
@@ -126,7 +127,8 @@ export async function handlePOST(request) {
       { status: 400 }
     );
   }
-  const coverageId = str(coverage?.id) || getPatient(patient?.id)?.coverageId || null;
+  const fhirId = (v) => (typeof v === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(v) ? v : null);
+  const coverageId = fhirId(coverage?.id) || getPatient(patient?.id)?.coverageId || null;
   // Every decision log carries the requesting NPI, so Provider Access shows
   // item PAs as well as CRD events.
   // An entry identified only by fullUrl is referenced by that fullUrl.
@@ -154,7 +156,7 @@ export async function handlePOST(request) {
   logTransaction(
     'PAS Gateway',
     'BUNDLE RECEIVED',
-    `FHIR Bundle (type=${String(bundle.type || '—').slice(0, 40)}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
+    `FHIR Bundle (type=${textOf(bundle.type).slice(0, 40) || '—'}) for Patient/${patient?.id || 'unknown'}, code=${orderedCode || '—'}. Bundle preserved unaltered.`,
     logMeta
   );
 
@@ -179,6 +181,7 @@ export async function handlePOST(request) {
       wrapPasResponseBundle([
         pasErrorClaimResponse({
           patientId: patient?.id || 'unknown',
+          patientRef,
           insurer: 'BCBSIL',
           reason: rejectReason,
           claimType,
@@ -311,6 +314,7 @@ export async function handlePOST(request) {
       description: 'Coverage information updated — PA denied',
       resource: coverageInformationOrder({
         patientId: patient?.id,
+        subjectRef: patientRef,
         orderedCode,
         serviceText: serviceCategory,
         coverageId,
@@ -401,6 +405,7 @@ export async function handlePOST(request) {
       vendor,
       patientId: patient?.id || 'unknown',
       npi: logMeta.npi,
+      patientRef,
       orderedCode,
       // Kept so the final ClaimResponse echoes the same item sequences.
       claimItems: (Array.isArray(claim?.item) ? claim.item : []).map((it) => ({ sequence: it?.sequence })),
@@ -425,7 +430,7 @@ export async function handlePOST(request) {
       patient: {
         memberId: member?.subscriberId || patient?.id || 'unknown',
         family: member?.family || (typeof patient?.name?.[0]?.family === 'string' ? patient.name[0].family.slice(0, 60) : 'Unknown'),
-        given: member?.given || (Array.isArray(patient?.name?.[0]?.given) ? patient.name[0].given.filter((g) => typeof g === 'string').slice(0, 3).map((g) => g.slice(0, 35)) : [])
+        given: member?.given || (Array.isArray(patient?.name?.[0]?.given) ? patient.name[0].given.filter((g) => typeof g === 'string' && g).slice(0, 3).map((g) => g.slice(0, 35)) : [])
       },
       practitionerNpi,
       payerUrl: `${apiBase(request)}/cdex/$submit-attachment`,
@@ -491,6 +496,7 @@ export async function handlePOST(request) {
     description: 'Coverage information updated post-PAS adjudication',
     resource: coverageInformationOrder({
       patientId: patient?.id,
+      subjectRef: patientRef,
       orderedCode,
       serviceText: serviceCategory,
       coverageId,

@@ -123,7 +123,7 @@ export function buildExceptions(rules, files) {
   }
   const unmatched = files.filter((f) => !pickPatternForFile(f.name));
   if (unmatched.length > 0) {
-    out.push({ code: 'UNMATCHED', issue: `${unmatched.length} uploaded file${unmatched.length === 1 ? '' : 's'} did not match a known grid pattern; treated as "Other / unclassified".` });
+    out.push({ code: 'UNMATCHED', issue: `${unmatched.length} uploaded file${unmatched.length === 1 ? '' : 's'} did not match a known grid pattern and ${unmatched.length === 1 ? 'was' : 'were'} not extracted.` });
   }
   return out;
 }

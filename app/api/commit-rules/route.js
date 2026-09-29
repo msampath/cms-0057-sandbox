@@ -94,7 +94,8 @@ export async function POST(request) {
 
   // --- Merge into active DB ---
   const activeByKey = new Map();
-  for (const r of db.rules) activeByKey.set(keyOf(r), r);
+  // First seen wins, as the CRD engine's rules.find() does.
+  for (const r of db.rules) if (!activeByKey.has(keyOf(r))) activeByKey.set(keyOf(r), r);
   let addedActive = 0;
   for (const r of incoming) {
     const k = keyOf(r);
@@ -134,7 +135,7 @@ export async function POST(request) {
       snap = { perFile: [], totalRules: 0, rules: [] };
     }
     const snapByKey = new Map();
-    for (const r of (snap.rules || [])) snapByKey.set(keyOf(r), r);
+    for (const r of (snap.rules || [])) if (!snapByKey.has(keyOf(r))) snapByKey.set(keyOf(r), r);
 
     // Per-file counts get a fresh tally from the incoming batch
     const filesTouchedThisCommit = new Map();
@@ -155,7 +156,10 @@ export async function POST(request) {
 
     // Rule count per source file, in one pass over the snapshot.
     const countBySource = new Map();
-    for (const r of snapByKey.values()) countBySource.set(r.source_file, (countBySource.get(r.source_file) || 0) + 1);
+    for (const r of snapByKey.values()) {
+      const name = r.source_file || '(unknown)';
+      countBySource.set(name, (countBySource.get(name) || 0) + 1);
+    }
 
     // Merge perFile metadata: keep existing entries, bump counts, add new
     const existingByName = new Map((snap.perFile || []).map((p) => [p.name, p]));

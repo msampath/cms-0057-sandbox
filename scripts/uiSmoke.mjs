@@ -25,7 +25,7 @@ const STEPS = [
     expect: process.env.SMOKE_LIVE_INTEGRATIONS
       ? ['Prior authorization required', 'Launch DTR', 'Optum sandbox response', 'Availity sandbox response']
       : ['Prior authorization required', 'Launch DTR', 'Optum sandbox response (saved copy)', 'Availity sandbox response (saved copy)'],
-    expectAbsent: ['Optum Real', 'real CRD engine']
+    expectAbsent: process.env.SMOKE_LIVE_INTEGRATIONS ? ['Optum Real', 'real CRD engine', '(saved copy)'] : ['Optum Real', 'real CRD engine']
   },
   {
     path: '/ehr',

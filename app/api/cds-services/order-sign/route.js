@@ -186,8 +186,10 @@ async function handlePOST(request) {
   const serviceCategory = str(body.serviceCategory, 200);
   const planType = str(body.planType);
   const patient = body.patient || body.patientResource || null;
-  const patientId = str(patient?.id) || str(body.patientId) || 'unknown';
-  const coverageId = str(body.coverage?.id) || str(body.coverageId) || 'unknown';
+  // Ids go into Patient/ and Coverage/ references, so only FHIR ids.
+  const fhirId = (v) => (typeof v === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(v) ? v : null);
+  const patientId = fhirId(patient?.id) || fhirId(body.patientId) || 'unknown';
+  const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
   const practitionerNpi = str(body.practitionerNpi) || str(body.npi);
   // CDS Hooks order-sign sends the order in context.draftOrders. When it

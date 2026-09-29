@@ -38,7 +38,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 });
   }
   const epicPatientId = body?.epicPatientId;
-  const libraryId = body?.libraryId || 'MRIBrainPrepopulation';
+  const libraryId = typeof body?.libraryId === 'string' ? body.libraryId : body?.libraryId === undefined ? 'MRIBrainPrepopulation' : '';
 
   if (!epicPatientId || typeof epicPatientId !== 'string') {
     return NextResponse.json(
@@ -49,7 +49,7 @@ export async function POST(request) {
   // Check the library before any upstream call is spent.
   if (!listCqlLibraries().includes(libraryId)) {
     return NextResponse.json(
-      { error: `Unknown CQL library: ${libraryId}`, knownLibraries: listCqlLibraries() },
+      { error: `Unknown CQL library: ${libraryId.slice(0, 64)}`, knownLibraries: listCqlLibraries() },
       { status: 404 }
     );
   }

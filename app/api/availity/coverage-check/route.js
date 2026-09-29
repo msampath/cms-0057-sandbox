@@ -35,7 +35,7 @@ export async function POST(request) {
   const patient = getPatient(body?.patientId);
   if (!patient) {
     return NextResponse.json(
-      { error: `Unknown patientId: ${body?.patientId}` },
+      { error: `Unknown patientId: ${typeof body?.patientId === 'string' ? body.patientId.slice(0, 64) : typeof body?.patientId}` },
       { status: 400 }
     );
   }

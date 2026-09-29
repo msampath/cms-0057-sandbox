@@ -44,7 +44,8 @@ function pickServiceTypeCode(rule, orderedCode) {
 // Bundle values go into X12 elements, so the 278 delimiters (~ * : ^) and
 // line breaks are replaced, and non-strings are coerced first.
 export function x12Safe(v) {
-  return String(v ?? '').replace(/[~*:^\r\n]/g, ' ');
+  // Only strings and numbers become text: String() throws on some objects.
+  return (typeof v === 'string' || typeof v === 'number' ? String(v) : '').replace(/[~*:^\r\n]/g, ' ');
 }
 
 function pickEntry(bundle, resourceType) {

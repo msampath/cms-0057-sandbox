@@ -791,6 +791,8 @@ export default function EhrDashboard() {
     setSmartContext(null);
     setOptumOrderSign(null);
     setAvailityResult(null);
+    setOptumOrderSignLoading(false);
+    setAvailityLoading(false);
     // The previous submission's panels do not belong to the new signing.
     optumPasReqRef.current += 1;
     setOptumPasResult(null);
