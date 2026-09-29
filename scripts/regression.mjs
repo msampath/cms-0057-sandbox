@@ -794,6 +794,20 @@ async function hardening() {
   check('a spec-shaped hook (context.patientId, draftOrders code) is evaluated like the sandbox shape',
     specHook?.cards?.[0]?.summary === 'Prior authorization required' && specOrder?.subject?.reference === 'Patient/pat-8849-jane-doe' && specOrder?.id === 'sr-spec-1',
     JSON.stringify([specHook?.cards?.[0]?.summary, specOrder?.subject?.reference]));
+  const hookBase = { hook: 'order-sign', planType: 'COMM-PPO', practitionerNpi: '1234567890' };
+  const draft70553 = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-2', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '70553' }] } } }] };
+  const viaPrefetch = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-2', context: { draftOrders: draft70553 }, prefetch: { patient: { resourceType: 'Patient', id: 'pat-8849-jane-doe' } } })).json;
+  check('prefetch.patient names the patient when context has no patientId', viaPrefetch?.systemActions?.[0]?.resource?.subject?.reference === 'Patient/pat-8849-jane-doe');
+  const failedPrefetch = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-3', context: { patientId: 'pat-8849-jane-doe', draftOrders: draft70553 }, prefetch: { patient: { resourceType: 'OperationOutcome', id: 'oo1' } } })).json;
+  check('a failed prefetch (OperationOutcome) is ignored and context.patientId is used', failedPrefetch?.systemActions?.[0]?.resource?.subject?.reference === 'Patient/pat-8849-jane-doe');
+  const withCoverage = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-4', context: { patientId: 'pat-8849-jane-doe', draftOrders: draft70553 }, prefetch: { coverage: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'Coverage', id: 'cov-comm-ppo-bcbsil' } }] } } })).json;
+  const covRef = (withCoverage?.systemActions?.[0]?.resource?.extension?.[0]?.extension || []).find((e) => e.url === 'coverage')?.valueReference?.reference;
+  check('the coverage prefetch names the Coverage', covRef === 'Coverage/cov-comm-ppo-bcbsil', covRef);
+  const snomedDraft = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-5', code: { coding: [{ system: 'http://snomed.info/sct', code: '70553' }] } } }] };
+  const snomed = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-5', context: { patientId: 'pat-8849-jane-doe', draftOrders: snomedDraft } })).json;
+  check('a draft order coded outside CPT or HCPCS is not matched as a CPT code', snomed?.cards?.[0]?.summary !== 'Prior authorization required', snomed?.cards?.[0]?.summary);
+  const goldByUser = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-spec-6', planType: 'COMM-PPO', context: { userId: 'Practitioner/pract-888-patel', patientId: 'pat-3301-dorothy-hayes', draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-6', code: { coding: [{ system: 'http://www.ama-assn.org/go/cpt', code: '27447' }] } } }] } } })).json;
+  check('context.userId resolves the practitioner NPI (gold card applies)', /gold-card/.test(goldByUser?.cards?.[0]?.summary || ''), goldByUser?.cards?.[0]?.summary);
   const usageOf2 = async (api) => ((await call('/api/metrics')).json?.usage || []).find((u) => u.api === api) || { total: 0, unauthenticated: 0 };
   const beforeBasic = await usageOf2('Patient Access');
   await call('/api/patient-access?patientId=pat-8849-jane-doe', { headers: { authorization: 'Basic eDp5' } });
@@ -923,7 +937,8 @@ async function hardening() {
   check('a J0717 Bundle with an id-less Patient is decided (A1) and keeps no shared record under "unknown"',
     noIdDrugRes.status === 200 && review(noIdDrugRes.json?.entry?.[0]?.resource)?.action === 'A1' &&
     !(await call('/api/drug-pa/record?patientId=unknown&drugKey=certolizumab')).json?.record);
-  const nullEntry = { resourceType: 'Bundle', type: 'collection', entry: [{ fullUrl: 'Patient/pat-8849-jane-doe', resource: null }, { resource: { resourceType: 'Claim', item: [{ sequence: 1, productOrService: { coding: [{ code: '70553' }] } }] } }] };
+  // A well-formed urn, so only the no-Patient guard can stop it being borrowed.
+  const nullEntry = { resourceType: 'Bundle', type: 'collection', entry: [{ fullUrl: 'urn:uuid:3f2a6c1e-0000-4000-8000-0000000000aa', resource: null }, { resource: { resourceType: 'Claim', item: [{ sequence: 1, productOrService: { coding: [{ code: '70553' }] } }] } }] };
   const nullEntryCr = (await post('/api/pas/submit', nullEntry)).json?.entry?.[0]?.resource;
   check('a Bundle with no Patient never borrows a fullUrl for its reference', nullEntryCr?.outcome === 'error' && nullEntryCr?.patient?.reference === 'Patient/unknown', nullEntryCr?.patient?.reference);
   const badFullUrl = pasBundle('70553');

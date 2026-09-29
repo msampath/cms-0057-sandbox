@@ -41,7 +41,8 @@ export default function UmDashboard() {
   // SWR dedupes by key — both this and <RulesExplorer> share the same
   // cached response, no double fetch. The full rule set is large, so it is
   // polled slowly and revalidated right after a commit, load, or reset.
-  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: tab === 'rules' ? 15000 : 0, revalidateOnFocus: tab === 'rules' });
+  const [staging, setStaging] = useState(null);
+  const { data: rulesData } = useSWR(apiUrl('/api/rules'), fetcher, { refreshInterval: tab === 'rules' && !staging ? 15000 : 0, revalidateOnFocus: tab === 'rules' && !staging });
   const ruleCount = rulesData?.rules?.length ?? 0;
   // One-shot probe: can this host run the Python extractor? Undefined while
   // loading is treated as available so the form does not flash disabled.
@@ -51,7 +52,6 @@ export default function UmDashboard() {
   });
   const extractorAvailable = extractHealth?.available !== false;
   const [files, setFiles] = useState([]);
-  const [staging, setStaging] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleUpload = async (e) => {
@@ -355,6 +355,8 @@ export default function UmDashboard() {
                 if (!confirm('Clear the Live Traffic Feed? Rules and schema are untouched.')) return;
                 await fetch(apiUrl('/api/logs/clear'), { method: 'POST' }).catch(() => {});
                 mutateKey(apiUrl('/api/logs'));
+      // Provider Access panels read state the reset cleared.
+      mutateKey((key) => typeof key === 'string' && key.includes('/api/provider-access'));
               }}
               className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1 rounded"
             >
@@ -411,6 +413,8 @@ function ResetDemoButton({ onReset, blocked = false }) {
       else onReset?.();
       mutateKey(apiUrl('/api/rules'));
       mutateKey(apiUrl('/api/logs'));
+      // Provider Access panels read state the reset cleared.
+      mutateKey((key) => typeof key === 'string' && key.includes('/api/provider-access'));
     } finally {
       setBusy(false);
     }
@@ -445,6 +449,8 @@ function EmptyStateResetLink({ onReset, blocked = false }) {
       else onReset?.();
       mutateKey(apiUrl('/api/rules'));
       mutateKey(apiUrl('/api/logs'));
+      // Provider Access panels read state the reset cleared.
+      mutateKey((key) => typeof key === 'string' && key.includes('/api/provider-access'));
     } finally {
       setBusy(false);
     }

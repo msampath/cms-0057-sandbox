@@ -87,7 +87,17 @@ const STEPS = [
     fillFiles: true,
     formText: 'Test statement.',
     submit: 'Submit PAS Request',
-    expect: ['Rejected by the clearinghouse before reaching the payer', '1.1.0 is not accepted']
+    // The CRD order stays on screen after a rejected submit.
+    expect: ['Rejected by the clearinghouse before reaching the payer', '1.1.0 is not accepted', 'coverage-information on the order']
+  },
+  {
+    path: '/ehr',
+    name: 'hard stop',
+    checkLabels: ['hard-stop'],
+    submit: 'Sign Order',
+    // A blocked order gets no second opinions.
+    expect: ['Order blocked'],
+    expectAbsent: ['Optum sandbox response', 'Availity sandbox response']
   },
   { path: '/patient', name: 'drug PAs', click: ['Jane Doe'], expect: ['Drug prior authorizations', 'Profile: PDex Prior Authorization', 'X12 886 44'] },
   { path: '/pharmacy', click: ['Look up PA status'], expect: ['PA status for Certolizumab', 'X12 886 44', 'RTPB', 'F&B formulary'] },

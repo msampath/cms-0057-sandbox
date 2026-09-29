@@ -121,10 +121,8 @@ export function buildExceptions(rules, files) {
   if (badCodes.length > 0) {
     out.push({ code: 'CODE_SHAPE', issue: `${badCodes.length} code rule${badCodes.length === 1 ? '' : 's'} with a code that is not CPT or HCPCS shaped (for example ${badCodes[0].service_code}).` });
   }
-  const unmatched = files.filter((f) => !pickPatternForFile(f.name));
-  if (unmatched.length > 0) {
-    out.push({ code: 'UNMATCHED', issue: `${unmatched.length} uploaded file${unmatched.length === 1 ? '' : 's'} did not match a known grid pattern and ${unmatched.length === 1 ? 'was' : 'were'} not extracted.` });
-  }
+  // An unrecognized filename is already reported by /api/extract as an
+  // EXTRACT error, so it is not listed twice.
   return out;
 }
 

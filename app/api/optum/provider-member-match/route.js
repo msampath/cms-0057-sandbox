@@ -61,10 +61,10 @@ export async function POST(request) {
     displayId = subject.subscriberId;
     subjectNpi = subject.npi;
   }
-  // The /um panel sends its active NPI so the entry shows in that panel.
   // A demo patient is attributed only to its own NPI, so a caller cannot
-  // attach one member to another provider's panel. Sandbox members are not
-  // demo patients, so the panel NPI is kept for them.
+  // attach one member to another provider's panel. A sandbox member is not
+  // a demo patient: its entry is logged with the panel's NPI but no
+  // patientId, so it appears in the feed and not in Provider Access.
   const clientNpi = typeof body?.npi === 'string' && /^[A-Za-z0-9-]{1,20}$/.test(body.npi) ? body.npi : null;
   const logNpi = source === 'demo' ? subjectNpi : clientNpi;
 

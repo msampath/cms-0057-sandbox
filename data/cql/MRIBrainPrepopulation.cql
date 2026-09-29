@@ -10,8 +10,9 @@
  *
  * The demographic defines feed the questionnaire's identity items.
  * HasRelevantNeuroCondition is an example clinical define -- true if
- * the patient has any Condition in an ICD-10 range that would justify
- * the imaging order, showing the pre-population pattern end to end.
+ * the patient has an active Condition with an ICD-10-CM code in a range
+ * that would justify the imaging order (G or R), showing the
+ * pre-population pattern end to end.
  */
 library MRIBrainPrepopulation version '1.0.0'
 

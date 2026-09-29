@@ -138,7 +138,7 @@ export default function RulesExplorer() {
                     >
                       <td className="px-2 py-1 align-top text-gray-100 font-mono">
                         {r.match_type === 'category' ? (
-                          <span title={r.service_category}>{(r.service_category || '').slice(0, 26)}…</span>
+                          <span title={r.service_category}>{(r.service_category || '').length > 26 ? `${r.service_category.slice(0, 26)}…` : r.service_category}</span>
                         ) : (
                           r.service_code
                         )}
@@ -282,6 +282,7 @@ function RuleDetail({ rule }) {
           label="Source grid"
           value={rule.source_file ? <code>{rule.source_file}</code> : <em>seed data (no uploaded grid)</em>}
         />
+        {Number.isInteger(rule.source_page) && <Field label="Source page" value={rule.source_page} mono />}
         {rule.also_in?.length > 0 && (
           <Field
             label="Also present in"

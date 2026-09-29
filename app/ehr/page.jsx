@@ -1178,11 +1178,12 @@ export default function EhrDashboard() {
     // ref, see PATIENT_SCENARIOS click below), makes our resolution
     // check `epicFetchReqRef.current !== myReq` fire and skip the
     // state update -- otherwise a stale Epic fetch could resolve
-    // AFTER the user picked jane-doe / john-smith and silently
+    // AFTER the user picked a static scenario (Jane Doe, for example) and silently
     // revert their deliberate selection.
     epicFetchReqRef.current += 1;
     const myReq = epicFetchReqRef.current;
     const previousEpicId = epicPatientId;
+    const previousEpicResult = epicResult;
     setEpicPatientId(id);
     setEpicResult(null);
     setEpicError(null);
@@ -1198,6 +1199,7 @@ export default function EhrDashboard() {
       if (!res.ok) {
         setEpicError(data?.error || `HTTP ${res.status}`);
         setEpicPatientId(previousEpicId);
+        setEpicResult(previousEpicResult);
       } else {
         // Invalidate SYNCHRONOUSLY (before React schedules the
         // re-render) but only if identity is actually changing --
@@ -1217,6 +1219,7 @@ export default function EhrDashboard() {
       if (epicFetchReqRef.current === myReq) {
         setEpicError(e.message);
         setEpicPatientId(previousEpicId);
+        setEpicResult(previousEpicResult);
       }
     } finally {
       if (epicFetchReqRef.current === myReq) {
@@ -2454,8 +2457,8 @@ function DeveloperPane({ questionnaire, cql }) {
 }
 
 // ---- Simulated CQL evaluation ---------------------------------------------
-// Honest framing (also surfaced as a tooltip in the DTR pane): the simulator
-// does not execute CQL. These hardcoded returns mirror what each library's
+// The simulator (also noted in a tooltip in the DTR pane) does not
+// execute CQL. These hardcoded returns mirror what each library's
 // `define` block would produce in a real environment.
 function simulatedCqlResult(expression) {
   switch (expression) {

@@ -138,7 +138,12 @@ def extract_pdf(path, kind):
         sys.exit(3)
     with pdf_file as pdf:
         for pi, page in enumerate(pdf.pages):
-            words = page.extract_words()
+            try:
+                words = page.extract_words()
+            except Exception as e:
+                # A damaged page is an unreadable PDF too.
+                print(f'cannot read page {pi + 1}: {e}', file=sys.stderr)
+                sys.exit(3)
             rows = group_rows(words, kind)
             for cols in rows:
                 code = cols[0].strip()

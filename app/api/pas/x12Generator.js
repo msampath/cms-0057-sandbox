@@ -15,7 +15,7 @@ const firstText = (...vals) => vals.map(textOf).find(Boolean) || '';
  *   - No round-trip loss: the Bundle never has to be reconstructed from
  *     X12 because the original is retained alongside.
  *
- * Honest framing: this 278 is illustrative. Production payloads carry
+ * This 278 is illustrative. Production payloads carry
  * ~30 segments with full envelope, trading-partner agreements, and TR3
  * 005010X217 conformance. This is screen-fitting for demo visibility.
  */

@@ -25,7 +25,11 @@ const CASES = [
   ['active I10 only (hypertension)', [cond('active', ICD10, 'I10')], false],
   ['resolved G43.909', [cond('resolved', ICD10, 'G43.909')], false],
   ['G code in another code system', [cond('active', 'http://snomed.info/sct', 'G123')], false],
-  ['no conditions', [], false]
+  ['no conditions', [], false],
+  // Status and code must hold on the same Condition, and system and code on
+  // the same coding.
+  ['resolved G43.909 plus active I10', [cond('resolved', ICD10, 'G43.909'), cond('active', ICD10, 'I10')], false],
+  ['one Condition coded I10 (ICD-10) and G123 (SNOMED)', [{ ...cond('active', ICD10, 'I10'), code: { coding: [{ system: ICD10, code: 'I10' }, { system: 'http://snomed.info/sct', code: 'G123' }] } }], false]
 ];
 
 let failures = 0;

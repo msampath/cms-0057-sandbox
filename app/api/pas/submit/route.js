@@ -133,7 +133,7 @@ export async function handlePOST(request) {
   // item PAs as well as CRD events.
   // An entry identified only by fullUrl is referenced by that fullUrl.
   // The fullUrl must be a urn:uuid or an absolute http(s) URL.
-  const FULL_URL = /^(urn:uuid:[0-9a-f-]{36}|https?:\/\/[^\s]{1,200})$/i;
+  const FULL_URL = /^(urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|https?:\/\/[^\s]{1,200})$/i;
   const patientRef = !patient
     ? 'Patient/unknown'
     : patient.id

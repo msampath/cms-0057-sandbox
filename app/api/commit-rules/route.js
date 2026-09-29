@@ -185,6 +185,9 @@ export async function POST(request) {
     fs.renameSync(`${PREINGESTED_PATH}.tmp`, PREINGESTED_PATH);
     snapshotCount = newSnap.totalRules;
   } catch (e) {
+    // Nothing reached the snapshot.
+    addedSnapshot = 0;
+    snapshotCount = 0;
     // If snapshot write fails, the active DB is still updated. Surface
     // the issue in the log but don't fail the request.
     logTransaction(
@@ -197,7 +200,7 @@ export async function POST(request) {
   logTransaction(
     'Ingestion Engine',
     'STATE COMMIT',
-    `Merged ${incoming.length} staged rules. Active: +${addedActive} new (${db.rules.length} total). Snapshot: +${addedSnapshot} new (${snapshotCount || db.rules.length} total).`
+    `Merged ${incoming.length} staged rules. Active: +${addedActive} new (${db.rules.length} total). Snapshot: ${snapshotCount ? `+${addedSnapshot} new (${snapshotCount} total)` : 'not written'}.`
   );
 
   return NextResponse.json({

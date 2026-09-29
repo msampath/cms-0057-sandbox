@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, logTransaction } from '@/lib/db';
+import { PATIENT_LIST } from '@/lib/patients';
 import { resolveRouting, conditionCodes } from '@/lib/routing';
 import { DRUG_BY_HCPCS, questionnaireIdForDrug } from '@/lib/drugPa';
 import { withUsage } from '@/lib/withUsage';
@@ -184,20 +185,39 @@ async function handlePOST(request) {
   const str = (v, max = 64) => (typeof v === 'string' && v && v.length <= max ? v : null);
   // CDS Hooks order-sign sends the order in context.draftOrders. When it
   // is there, the coverage-information update targets that order's id.
-  const draftOrder = Array.isArray(body.context?.draftOrders?.entry) ? body.context.draftOrders.entry[0]?.resource : null;
+  // The first ServiceRequest among the draft orders. Its CPT or HCPCS coding
+  // is the ordered code. Another order type is not treated as a service.
+  const draftOrder = (Array.isArray(body.context?.draftOrders?.entry) ? body.context.draftOrders.entry : [])
+    .map((e) => e?.resource)
+    .find((r) => r?.resourceType === 'ServiceRequest') || null;
   const draftOrderId = typeof draftOrder?.id === 'string' ? draftOrder.id : null;
+  const BILLING_SYSTEMS = ['http://www.ama-assn.org/go/cpt', 'https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets'];
+  const draftCode = (Array.isArray(draftOrder?.code?.coding) ? draftOrder.code.coding : []).find((c) => BILLING_SYSTEMS.includes(c?.system))?.code;
   // The sandbox EHR sends code and patientId at the top level. A CDS Hooks
   // client sends them in context (draftOrders, patientId) and prefetch.
-  const orderedCode = str(body.code) || str(body.serviceCode) || str(draftOrder?.code?.coding?.[0]?.code);
+  const orderedCode = str(body.code) || str(body.serviceCode) || str(draftCode);
   const serviceCategory = str(body.serviceCategory, 200);
   const planType = str(body.planType);
-  const patient = body.patient || body.patientResource || body.prefetch?.patient || null;
+  // A prefetch that failed arrives as an OperationOutcome, so only a real
+  // Patient is used. context.patientId outranks the prefetch.
+  const prefetchPatient = body.prefetch?.patient?.resourceType === 'Patient' ? body.prefetch.patient : null;
+  const patient = body.patient || body.patientResource || prefetchPatient || null;
   // Ids go into Patient/ and Coverage/ references, so only FHIR ids.
   const fhirId = (v) => (typeof v === 'string' && /^[A-Za-z0-9.-]{1,64}$/.test(v) ? v : null);
-  const patientId = fhirId(patient?.id) || fhirId(body.patientId) || fhirId(body.context?.patientId) || 'unknown';
-  const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || 'unknown';
+  const patientId =
+    fhirId(body.patient?.id) || fhirId(body.patientResource?.id) || fhirId(body.patientId) ||
+    fhirId(body.context?.patientId) || fhirId(prefetchPatient?.id) || 'unknown';
+  // The advertised coverage prefetch is a search Bundle of Coverage.
+  const prefetchCoverage = Array.isArray(body.prefetch?.coverage?.entry)
+    ? body.prefetch.coverage.entry.map((e) => e?.resource).find((r) => r?.resourceType === 'Coverage')
+    : null;
+  const coverageId = fhirId(body.coverage?.id) || fhirId(body.coverageId) || fhirId(prefetchCoverage?.id) || 'unknown';
   const hardStopRequested = Boolean(body[HARD_STOP_FLAG]);
-  const practitionerNpi = str(body.practitionerNpi) || str(body.npi);
+  // A CDS Hooks client names the user as context.userId (Practitioner/<id>).
+  // The demo practitioners' NPIs come from lib/patients.js.
+  const userPractitionerId = typeof body.context?.userId === 'string' ? body.context.userId.replace(/^Practitioner\//, '') : null;
+  const npiFromUser = userPractitionerId ? PATIENT_LIST.find((p) => p.practitioner?.id === userPractitionerId)?.npi || null : null;
+  const practitionerNpi = str(body.practitionerNpi) || str(body.npi) || npiFromUser;
 
   logTransaction(
     'CRD Gateway',
