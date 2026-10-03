@@ -39,32 +39,32 @@ The May and June work happened in Claude Desktop chats. Those transcripts are no
 
 Four habits did most of the work. None of them are novel, but skipping any one of them would have cost more than it saved.
 
-- **Research before code.** Both large build phases opened with a written scoping document rather than a branch. `provider-patient-p2p-research.md` mapped each of the three remaining APIs to its CFR cite and its implementation guide, and listed the open regulatory questions, before a single route existed. It is kept in the repo as a record of what was known at the time.
-- **A plan with verification criteria per phase.** Each phase carried its own definition of done. The deployability phase, for example, was not done when the Dockerfile built, it was done when a fresh-clone simulation with the database deleted produced populated surfaces with zero clicks.
-- **Phase-scoped commits.** The conformance pass is seven commits, each one a single contract change landed server-side and client-side together, so the demo was never broken between them.
-- **Verification stayed manual.** There is no test suite. Lint is the only automated check. Every bug listed below was found by driving the browser, reading a build route table, or curling a live endpoint, not by a passing green check.
+- Research before code: Both large build phases opened with a written scoping document rather than a branch. `provider-patient-p2p-research.md` mapped each of the three remaining APIs to its CFR cite and its implementation guide, and listed the open regulatory questions before a single route existed. It is kept in the repo as a record of what was known at the time.
+- A plan with verification criteria per phase: Each phase carried its own definition of done. The deployability phase, for example, was not done when the Dockerfile built. It was done when a fresh-clone simulation with the database deleted produced populated surfaces with zero clicks.
+- Phase-scoped commits: The conformance pass is seven commits, each a single contract change landed server-side and client-side together, so the demo was never broken between them.
+- Verification stayed manual: There is no test suite. Lint is the only automated check. Every bug listed below was found by driving the browser, reading a build route table, or curling a live endpoint, not by a passing green check.
 
 ---
 
 ## Decisions worth explaining
 
-**A managed FHIR store was rejected on cost, then cited anyway.**
+A managed FHIR store was rejected on cost, then cited anyway.
 AWS HealthLake runs around $0.27 per datastore-hour, roughly $195 a month, for a demo that gets a handful of visits a week. The sandbox uses a file-backed JSON store instead, and the architecture doc names HealthLake as the production path with the reasoning attached. Being able to explain why the cheap thing is in the demo and the expensive thing is in the design is more useful in an interview than pretending the demo is production.
 
-**The hosting decision changed when the constraint was restated.**
+The hosting decision changed when the constraint was restated.
 The plan started on AWS free tier: Lightsail container plus CloudFront plus Route 53. The constraint was then restated from cheap to free, which is a different requirement. Google Cloud Run at `min-instances 0` plus Firebase Hosting stays inside the always-free tier at demo traffic, so the design moved. Reusing an existing billing-enabled project rather than opening a new account kept the free-tier quota intact, since the free tier is per billing account.
 
-**Path, not subdomain.**
+Path, not subdomain.
 Serving at `surakshith.com/cms-0057` rather than `cms0057.surakshith.com` makes the portfolio and the demo one site with one certificate. The cost is real: `basePath` in `next.config.js`, plus a sweep of every literal `fetch('/api/...')` call through `lib/basePath.js`. Next.js rewrites links and static assets for a base path but not literal fetch URLs, so a missed call site fails with a 404 in production and nowhere else. A full click-through of all four surfaces was the only reliable test.
 
-**Scale-to-zero broke the pended flow, so the flow changed.**
+Scale-to-zero broke the pended flow, so the flow changed.
 The 8-second pended review ran on a `setTimeout`. A container that scales to zero does not keep timers alive. Rather than pin an instance, finalization became request-driven in `lib/pendedReview.js`: the client poll itself decides whether the review window has elapsed. The infrastructure choice reached back and changed an application behavior, which is usually the sign the infrastructure choice was load-bearing.
 
-**No service account keys.**
+No service account keys.
 Organization policy on the account blocks service account key creation, which broke the obvious CI path. CI moved to Workload Identity Federation, keyless and locked to this repository by attribute condition. The blocker produced the better answer.
 
-**Docker Desktop was broken for weeks and it did not block anything.**
-The recurring `npipe` error turned out to be `AutoStart: false` in the settings store, so the engine was simply never running. Until that surfaced, image builds ran remotely through `gcloud run deploy --source`. Worth noting because the correct move was to route around the broken tool rather than stop and fix it first.
+Docker Desktop was broken for weeks and it did not block anything.
+The recurring `npipe` error turned out to be `AutoStart: false` in the settings store, so the engine was simply never running. Until that surfaced, image builds ran remotely through `gcloud run deploy --source`. The build could continue by routing around the broken tool first.
 
 ---
 
@@ -72,15 +72,15 @@ The recurring `npipe` error turned out to be `AutoStart: false` in the settings 
 
 Five real defects, four of which would have been invisible until someone else hit them.
 
-- **Next.js froze three API routes at build time.** Next 14 statically optimizes parameter-less GET route handlers, so `/api/rules`, `/api/logs`, and `/api/schema` would have shipped a snapshot of build-time data. This was never visible in months of development because the app had only ever run under `npm run dev`. Fixed with `export const dynamic = 'force-dynamic'`, verified by reading the build route table for `ƒ` rather than `○`.
-- **A gold-card program with an empty provider list gold-carded everyone.** An Advanced Imaging pilot with `providers: []` read as program-wide, so every MRI order skipped prior authorization and the flagship demo arc never fired on a fresh database. Fixed with a sentinel NPI.
-- **The seed skipped itself when the first request was a CDS hook.** `logTransaction` wrote to the transaction log before anything called `getDb()`, so the "is the log empty" guard saw a non-empty log and decided seeding had already happened. Fixed by calling `ensureSeeded()` from `logTransaction` as well.
-- **The pended scenario used a code that does not pend on that plan.** CPT 15820 is Medicare Advantage only in the real 2026 grids. The scenario moved to the MA-PPO patient rather than bending the data to fit the script, which is the whole point of using real grids.
-- **Domain verification failed against a proxied origin.** Firebase Hosting returned conflicting results for the ACME HTTP challenge while the Cloudflare proxy was in front of the record. Resolved by adjusting the record before verification, which is a DNS ordering problem rather than a code one.
+- Next.js froze three API routes at build time: Next 14 statically optimizes parameter-less GET route handlers, so `/api/rules`, `/api/logs`, and `/api/schema` would have shipped a snapshot of build-time data. This was never visible in months of development because the app had only ever run under `npm run dev`. Fixed with `export const dynamic = 'force-dynamic'`, verified by reading the build route table for `ƒ` rather than `○`.
+- A gold-card program with an empty provider list gold-carded everyone: An Advanced Imaging pilot with `providers: []` read as program-wide, so every MRI order skipped prior authorization and the flagship demo arc never fired on a fresh database. Fixed with a sentinel NPI.
+- The seed skipped itself when the first request was a CDS hook: `logTransaction` wrote to the transaction log before anything called `getDb()`, so the "is the log empty" guard saw a non-empty log and decided seeding had already happened. Fixed by calling `ensureSeeded()` from `logTransaction` as well.
+- The pended scenario used a code that does not pend on that plan: CPT 15820 is Medicare Advantage only in the real 2026 grids. The scenario moved to the MA-PPO patient rather than bending the data to fit the script, which is the point of using real grids.
+- Domain verification failed against a proxied origin: Firebase Hosting returned conflicting results for the ACME HTTP challenge while the Cloudflare proxy was in front of the record. Resolved by adjusting the record before verification, a DNS ordering problem rather than a code one.
 
 ---
 
-## Where Claude fit
+## Where Claude fits
 
 The build ran across two long Claude Code sessions plus earlier Claude Desktop chats. Approximate shape of the main July session, from the transcript:
 
@@ -115,13 +115,13 @@ The trade for $0 is a cold start of a few seconds after an idle period, and in-m
 
 Added after the initial ship. The sandbox now plugs into public health-IT test tools, so its story is not "this thing runs by itself" but "this thing sits in a real ecosystem":
 
-- **CDS Hooks Sandbox** at `sandbox.cds-hooks.org` calls the CRD engine via the discovery URL. Zero code, just CORS. Verified.
-- **SMART App Launcher** at `launch.smarthealthit.org` opens `/ehr` as a launched SMART on FHIR app. Public-client PKCE, patient fetched from the launching FHIR server. Verified end to end.
-- **Availity Coverages** is the sandbox's pre-order eligibility check. When a provider signs an order in `/ehr`, we call Availity's real Coverages API (X12 270/271) alongside the CRD hook — a real clearinghouse round trip verifying the patient has active coverage at the payer, live and verified against Availity's demo sandbox. Originally built against their Service Reviews API (X12 278) but pivoted after empirical testing showed the developer credentials we obtained were subscribed to a product that includes Coverages but not Service Reviews. Two real quirks found only by live testing, both worth recording: the OAuth scope Availity's own blog example lists (`healthcare-hipaa-transactions healthcare-hipaa-transactions-demo`, dual) fails with `unauthorized_client` — the single `-demo` scope alone is what works. And demo-tier responses come back synchronously in one shot, not the async 202+poll shape the Service Reviews docs implied would apply.
-- **Inferno by ONC** can run its Da Vinci PAS conformance test kit against the deployed URL. CORS and endpoints verified reachable.
-- **Epic on FHIR, SMART launch** — three app registrations under `msampath` (CMS Prior Auth, General, Backend Systems), the first two marked Ready for Production. OAuth handshake verified end-to-end against Epic's real sandbox endpoints — non-production client id accepted, ticket generated, Hyperspace login page reached. Resource-scope grants are blocked by Epic's public-sandbox policy for third-party developers under the standalone/EHR-launch path by design; reading actual patient FHIR data through that path requires a customer partnership. Full round-trip launch with patient context stays with the SMART App Launcher (Section 3) which is what Epic's own docs recommend for that purpose.
-- **Epic on FHIR, Backend Services** — a separate outbound path from the above, and the one that actually works. The sandbox signs an RS384 `client-confidential-asymmetric` JWT assertion with its own keypair and calls Epic's `client_credentials` token endpoint directly, the path Epic's Developer Testing Guide documents as the intended way for backend apps to connect. It reads real Patient resources for Epic's well-known sandbox patients: full US Core shape, real address and contact data, calculated pronouns, managing organization. The first 45 minutes of attempts all failed with `invalid_client`, every piece of which was independently ruled out as our own bug before the cause turned out to be Epic's own documented registration sync delay. The next attempt after that window succeeded with no changes on either side. On top of that Patient read, a DTR pre-population path executes a real CQL library (`data/cql/MRIBrainPrepopulation.cql`, compiled to ELM under `data/cql/elm/`) against a Bundle assembled from Epic through `fetchEpicPatientBundle`. Client-side execution via `cql-execution` + `cql-exec-fhir`, since Epic's public sandbox does not expose `$cql` or `Library/$evaluate`. Live outcome from the current app registration: demographic defines evaluate correctly against Epic's real Patient, and the clinical define returns `false` because the app registration only carries `Patient.Read` and `Coverage.Read`. Epic's live sandbox returns `403` for `Condition` and `Observation` reads. The partial-failure design surfaces those in a `warnings[]` array rather than failing the whole pre-population, so the pipeline is complete end to end and the clinical define lights up as soon as the two extra scopes are added to a fresh Epic app registration.
-- **Optum real payer API** — a different kind of integration from the others. Epic is an EHR vendor's sandbox, Availity is a clearinghouse. Optum's sandbox is a second, independent **payer's** own live implementation of the same CMS-0057-F APIs this sandbox implements. The full CRD order-sign → DTR questionnaire-package → PAS Claim/$submit chain is wired into `/ehr`, running in parallel with this sandbox's own engine and Availity's projection, plus a Provider Access `$bulk-member-match` call wired into `/um`. Live and verified against real UnitedHealthcare-shaped responses. Two of Optum's own documented request shapes turned out to be wrong when tested live: the token endpoint wants form-encoding, not the JSON body their setup docs show, and the real CDS Hooks invocation path (`crd-order-sign`) does not match the `id` field their own discovery response returns. A follow-on capture pass against their developer portal surfaced more things worth recording. Their sandbox has no real member roster. The gateway returns canned data regardless of what the client submits, though the demographics from their own Try-It example are recognized as matches. Those are now checked into `lib/optumSandboxMembers.js`, and the `/um` Provider Access panel toggles between them and this sandbox's own demo patients to show both outcomes. The Provider Access OAS also documents a full async Da Vinci `$davinci-data-export` chain, wired in as a three-step UI on the same panel. Two more empirical findings from the live verification: the spec-shape PDex `$bulk-member-match` bundle returns `400 payerId or lob path param is missing`, the same class of URL/body shape mismatch we hit on the CDS Hooks path, and `$davinci-data-export` returns `405 Method Not Allowed` with the error body hinting at a hyphenated base path (`fhir-provider-access`) that neither the OAS nor the sibling operations use. Mock mode is unaffected in both cases and the demo walks the full flow end to end without credentials.
+- CDS Hooks Sandbox at `sandbox.cds-hooks.org` calls the CRD engine via the discovery URL. Zero code, just CORS. Verified.
+- SMART App Launcher at `launch.smarthealthit.org` opens `/ehr` as a launched SMART on FHIR app. Public-client PKCE, patient fetched from the launching FHIR server. Verified end to end.
+- Availity Coverages is the sandbox's pre-order eligibility check. When a provider signs an order in `/ehr`, we call Availity's real Coverages API (X12 270/271) alongside the CRD hook. This is a real clearinghouse round trip that verifies active coverage at the payer against Availity's demo sandbox. It was originally built against their Service Reviews API (X12 278), but empirical testing showed the developer credentials were subscribed to a product that includes Coverages but not Service Reviews. Two live-test findings matter: the dual OAuth scope in Availity's blog example (`healthcare-hipaa-transactions healthcare-hipaa-transactions-demo`) fails with `unauthorized_client`; the single `-demo` scope alone works. Demo-tier responses also come back synchronously in one shot, not in the async 202+poll shape the Service Reviews docs implied.
+- Inferno by ONC can run its Da Vinci PAS conformance test kit against the deployed URL. CORS and endpoints verified reachable.
+- Epic on FHIR, SMART launch: three app registrations under `msampath` (CMS Prior Auth, General, Backend Systems), the first two marked Ready for Production. OAuth handshake verified end-to-end against Epic's real sandbox endpoints: non-production client id accepted, ticket generated, Hyperspace login page reached. Epic's public-sandbox policy blocks resource-scope grants for third-party developers under the standalone/EHR-launch path; reading actual patient FHIR data through that path requires a customer partnership. Full round-trip launch with patient context stays with the SMART App Launcher (Section 3), which Epic's own docs recommend for that purpose.
+- Epic on FHIR, Backend Services: a separate outbound path from the above that works. The sandbox signs an RS384 `client-confidential-asymmetric` JWT assertion with its own keypair and calls Epic's `client_credentials` token endpoint directly, the path Epic's Developer Testing Guide documents for backend apps. It reads real Patient resources for Epic's well-known sandbox patients: full US Core shape, real address and contact data, calculated pronouns, and managing organization. The first 45 minutes of attempts all failed with `invalid_client`. Every piece was independently ruled out as our own bug before the cause turned out to be Epic's documented registration sync delay. The next attempt after that window succeeded with no changes on either side. On top of that Patient read, a DTR pre-population path executes a real CQL library (`data/cql/MRIBrainPrepopulation.cql`, compiled to ELM under `data/cql/elm/`) against a Bundle assembled from Epic through `fetchEpicPatientBundle`. It uses client-side execution via `cql-execution` + `cql-exec-fhir` because Epic's public sandbox does not expose `$cql` or `Library/$evaluate`. In the current app registration, demographic defines evaluate correctly against Epic's real Patient and the clinical define returns `false` because the app registration only carries `Patient.Read` and `Coverage.Read`. Epic's live sandbox returns `403` for `Condition` and `Observation` reads. Partial failure adds those to a `warnings[]` array without failing the whole pre-population, so the pipeline is complete end to end and the clinical define will light up when the two extra scopes are added to a fresh Epic app registration.
+- Optum real payer API: a different kind of integration from the others. Epic is an EHR vendor's sandbox and Availity is a clearinghouse. Optum's sandbox is a second, independent payer's own live implementation of the same CMS-0057-F APIs this sandbox implements. The full CRD order-sign → DTR questionnaire-package → PAS Claim/$submit chain is wired into `/ehr`, running in parallel with this sandbox's own engine and Availity's projection, plus a Provider Access `$bulk-member-match` call wired into `/um`. It is live and verified against real UnitedHealthcare-shaped responses. Two documented Optum request shapes proved wrong in live testing: the token endpoint wants form-encoding, not the JSON body their setup docs show, and the real CDS Hooks invocation path (`crd-order-sign`) does not match the `id` field their discovery response returns. A later capture pass surfaced more findings. Their sandbox has no real member roster. The gateway returns canned data regardless of what the client submits, though the demographics from their own Try-It example are recognized as matches. Those are now checked into `lib/optumSandboxMembers.js`, and the `/um` Provider Access panel toggles between them and this sandbox's demo patients to show both outcomes. The Provider Access OAS also documents a full async Da Vinci `$davinci-data-export` chain, wired in as a three-step UI on the same panel. Two more live-verification findings follow: the spec-shape PDex `$bulk-member-match` bundle returns `400 payerId or lob path param is missing`, the same URL/body shape mismatch as the CDS Hooks path, and `$davinci-data-export` returns `405 Method Not Allowed` with an error body that hints at a hyphenated base path (`fhir-provider-access`) that neither the OAS nor the sibling operations use. Mock mode is unaffected in both cases and the demo walks the full flow end to end without credentials.
 
 Together these fill in the columns the sandbox was missing before: EHR-side callers on the inbound and a clearinghouse on the outbound, with a conformance oracle grading both, an outbound path to Epic specifically, and now a second real payer's own implementation of the same mandated APIs. See [docs/integrations.md](integrations.md) for setup steps per tool.
 
@@ -141,7 +141,7 @@ Carried in the README roadmap, roughly in the order I would pick them up:
 
 CMS-0062-P is the proposed follow-on rule. It extends prior authorization to drugs, proposes FHIR as the HIPAA standard, and adds reporting. I built it in one overnight run, as a plan and eight phases, with a working rule I set up front: nothing merges without two reviewers who are trying to prove it wrong.
 
-**Method**
+### Method
 
 - The plan came first. It was validated against the proposed rule text and eCFR before any code, and each of my positions on the rule was tied to the page and paragraph it answers
 - Claude Code (Opus 5.5) built each phase. Gemini 3.8 Flash and Gemini 3.1 Pro then reviewed it adversarially through the `agy` CLI, and every finding was checked against the code or a primary source before I acted on it. I rejected a fair number, with the evidence written back to the reviewers so they would not re-raise them
@@ -149,14 +149,14 @@ CMS-0062-P is the proposed follow-on rule. It extends prior authorization to dru
 - After the phases, Opus 5.5 and Sonnet 5.5 ran a report-only super-review through the `claude` CLI, in rounds. Each round I checked every finding against the code, fixed the confirmed ones in one commit, and wrote the rejected ones back with my reasons. I stopped after round 11, the third round in a row with nothing above LOW from either reviewer
 - By then the checks stood at 291 in `npm run regression`, 19 steps in `npm run ui-smoke`, and 12 cases in `node scripts/testElm.mjs`
 
-**Things the review loop caught that I would likely have shipped**
+### Things the review loop caught that I would likely have shipped
 
 - My UI smoke script passed while broken. A variable it used was never declared, the error was swallowed inside an event handler, and every step reported ok. Gemini Flash found it by reading the code
 - A PAS pend used `outcome: queued`, which the PAS 2.2.1 profile does not allow. The reviewers disagreed on this one, and the IG's own pended example settled it
 - The PDex Prior Authorization profile only admits CPT, HCPCS, and HIPPS codes, so an NDC-coded pharmacy PA cannot conform. I left that EOB without the profile claim and wrote it down as a finding rather than borrowing a medical code
 - US Core 3.1.1 had already expired from 45 CFR 170.215 on January 1, 2026. The Patient Access API still claimed it, so Phase 7 moved it to 6.1.0
 
-**Things the super-review caught that the phase reviews did not**
+### Things the super-review caught that the phase reviews did not
 
 - The compiled CQL that actually runs (the hand-authored ELM) checked only that a Condition existed. The CQL source filters to active G or R codes, so a patient with only hypertension got a yes pre-fill for the MRI brain order. The ELM now carries the full filter, and `testElm.mjs` checks it against negative cases
 - CRD coverage-information was a Task with flattened `#covered`-style extensions. The CRD StructureDefinition defines one complex extension on the order resource, so it moved to a ServiceRequest, with the IG's invariants
@@ -165,7 +165,7 @@ CMS-0062-P is the proposed follow-on rule. It extends prior authorization to dru
 - Several unauthenticated routes held caller-sized strings or bodies in memory. The fix that held was central: one body-size guard for every POST route and a size cap inside the log, rather than one site at a time
 - The SMART launch page would follow any discovery document into a redirect, including a `javascript:` URL, and the upload route took a client file path
 
-**Things I got wrong along the way**
+### Things I got wrong along the way
 
 - Adalimumab was the drug in the plan. It is not on the BCBSIL grid, and this repo does not add synthetic rules, so the build uses certolizumab, whose grid row happens to say "not for use when drug is self administered"
 - A few of my scripted multi-file edits aborted partway and left half a fix in place. The reviewers noticed before I did, which is part of why the loop runs after every phase and not just at the end
@@ -175,8 +175,8 @@ CMS-0062-P is the proposed follow-on rule. It extends prior authorization to dru
 
 For a reviewer with fifteen minutes:
 
-- `app/api/cds-services/order-sign/route.js` — the CRD matching cascade, which is the closest thing this repo has to a core algorithm
-- `lib/db.js` and `lib/seed.js` — how the demo makes itself self-guiding on first touch
-- `app/api/pas/x12Generator.js` — the FHIR to X12 278 projection behind the translator drawer
-- [docs/architecture.md](architecture.md) — data flow and how a production build would differ
-- [docs/conformance.md](conformance.md) — what is implemented against the spec, and what is simulated, stated plainly
+- `app/api/cds-services/order-sign/route.js`: the CRD matching cascade, which is the closest thing this repo has to a core algorithm
+- `lib/db.js` and `lib/seed.js`: how the demo makes itself self-guiding on first touch
+- `app/api/pas/x12Generator.js`: the FHIR to X12 278 projection behind the translator drawer
+- [docs/architecture.md](architecture.md): data flow and how a production build would differ
+- [docs/conformance.md](conformance.md): what is implemented against the spec, and what is simulated, stated plainly

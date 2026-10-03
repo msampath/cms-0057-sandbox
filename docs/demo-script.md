@@ -1,6 +1,6 @@
 # Demo script
 
-Two artifacts in one file: a storyboard for the recorded walkthrough video, and talking points for driving the demo live in interviews. Both assume the deployed instance or a local run at `/cms-0057`, reset to the seeded baseline (the **Reset demo** button in the UM header).
+Two artifacts in one file: a storyboard for the recorded walkthrough video, and talking points for driving the demo live in interviews. Both assume the deployed instance or a local run at `/cms-0057`, reset to the seeded baseline (the Reset demo button in the UM header).
 
 Pre-staging checklist before recording or screen sharing:
 
@@ -17,8 +17,8 @@ Pre-staging checklist before recording or screen sharing:
 |---|---|---|
 | 0:00 | Landing page, slow scroll through the regulatory strip and the four API cards | CMS-0057-F requires payers to expose prior authorization and member data through four FHIR APIs by January 2027. This is a working simulation of all four, built on the real BCBSIL 2026 prior authorization grids, around 3,154 rules. |
 | 0:20 | `/um` Rules Explorer, type `70553`, open the rule detail | The payer side starts with the rule index. This MRI Brain rule came out of the actual PDF grid, and the provenance points back to the source file and page. It routes to Carelon and binds a DTR questionnaire. |
-| 0:40 | `/ehr`, Jane Doe selected, click **Sign Order** | On the provider side, signing the order fires a CDS Hooks order-sign call. The card says prior authorization is required, names the reviewer, and offers the documentation app. |
-| 0:55 | Click **Launch DTR SMART App**, point at the CQL badge, attach the file, submit | The questionnaire is a FHIR resource, and the highlighted answer was pre-populated from CQL logic. Submitting sends a PAS request Bundle. |
+| 0:40 | `/ehr`, Jane Doe selected, click Sign Order | On the provider side, signing the order fires a CDS Hooks order-sign call. The card says prior authorization is required, names the reviewer, and offers the documentation app. |
+| 0:55 | Click Launch DTR SMART App, point at the CQL badge, attach the file, submit | The questionnaire is a FHIR resource, and the highlighted answer was pre-populated from CQL logic. Submitting sends a PAS request Bundle. |
 | 1:15 | Green approved card with the auth number | The determination comes back as a profiled FHIR ClaimResponse inside a PAS response Bundle, with the authorization number. |
 | 1:25 | `/um` Live Traffic Feed, expand the FHIR ↔ X12 drawer, hover a mapping row | The payer feed shows both representations side by side. The FHIR Bundle is preserved as the source of truth, and the X12 278 runs alongside for the legacy adjudication engine, with field-to-segment mappings. |
 | 1:45 | `/patient`, Jane Doe, point at the token chip, the EOB table, and the history | The member sees the same determination through the Patient Access API. The portal holds a real bearer token, and the claims are CARIN Blue Button shaped resources. |

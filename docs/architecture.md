@@ -71,7 +71,7 @@ flowchart LR
 
 ## Where a production build would differ
 
-A managed FHIR store such as AWS HealthLake or Azure Health Data Services in place of the file-backed sandbox store (HealthLake Advanced also brings native SMART support, at roughly two hundred dollars a month of datastore cost, which is one reason this demo runs on a free tier instead), a durable job queue and worker in place of the request-driven review clock, and asymmetric SMART client registration in place of the shared demo secret. [Conformance notes](conformance.md) track what is real and what is simulated in more detail.
+A production build would use a managed FHIR store such as AWS HealthLake or Azure Health Data Services instead of the file-backed sandbox store. HealthLake Advanced also brings native SMART support at roughly two hundred dollars a month of datastore cost, one reason this demo runs on a free tier. It would also use a durable job queue and worker instead of the request-driven review clock, and asymmetric SMART client registration instead of the shared demo secret. [Conformance notes](conformance.md) track what is real and what is simulated in more detail.
 
 ## Where things live
 

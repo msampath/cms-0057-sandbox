@@ -1,8 +1,8 @@
-# CMS-0062-P Implementation Plan
+# CMS-0062-P implementation plan
 
-I plan to extend the sandbox from the CMS-0057-F baseline to the proposed rule CMS-0062-P, *Interoperability Standards and Prior Authorization for Drugs* (91 FR 19890, April 14, 2026, RIN 0938-AV44).
+This plan extends the sandbox from the CMS-0057-F baseline to the proposed rule CMS-0062-P, *Interoperability Standards and Prior Authorization for Drugs* (91 FR 19890, April 14, 2026, RIN 0938-AV44).
 
-I organized it around my reading of the proposed rule and the positions I took on it. The rule is still a proposal. Section numbers, versions, and dates below follow the proposed text and may change in the final rule.
+I organized it around my reading of the proposed rule and the positions I took on it. The rule is still proposed. Section numbers, versions, and dates below follow the proposed text and may change in the final rule.
 
 ---
 

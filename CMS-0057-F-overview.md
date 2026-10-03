@@ -1,12 +1,12 @@
-# CMS-0057-F: One More Channel in a Long Stack
+# CMS-0057-F: one more channel in a long stack
 
-Prior authorization as a process has been around for decades, and payers have been running it across a wide range of channels for just as long: phone calls to a nurse reviewer, fax submissions to a clinical team, provider portal web forms, direct X12 278 EDI feeds from large health systems, and proprietary API integrations with major EHR vendors. CMS-0057-F does not replace any of those channels. From what I have seen working through both the regulatory text and the surrounding implementation guides, the rule is narrower than the discussion around it often suggests: it requires impacted payers to expose a FHIR-accessible API on the provider-facing side by January 1, 2027, and it leaves the internal payer architecture entirely untouched. What happens between the FHIR API server and the UM system behind it, whether that is FHIR-to-FHIR, FHIR-to-X12, or FHIR-to-whatever-proprietary-format the adjudication engine expects, is a payer design decision that CMS has not weighed in on.
+Prior authorization has used many channels for decades: phone calls to a nurse reviewer, fax submissions to a clinical team, provider portal web forms, direct X12 278 EDI feeds from large health systems, and proprietary API integrations with major EHR vendors. CMS-0057-F does not replace them. From working through the regulatory text and the implementation guides, I read the rule more narrowly than much of the discussion around it: it requires impacted payers to expose a FHIR-accessible provider-facing API by January 1, 2027, and leaves the internal payer architecture untouched. What happens between the FHIR API server and the UM system, whether FHIR-to-FHIR, FHIR-to-X12, or another proprietary format the adjudication engine expects, is a payer design decision CMS has not addressed.
 
 ---
 
-## The Prior Authorization Channel Stack
+## The prior authorization channel stack
 
-It is worth mapping out what the actual channel landscape looks like before adding FHIR to the picture, because the rule makes more sense in that context.
+The channel stack gives the rule its context.
 
 ```mermaid
 graph TB
@@ -36,7 +36,7 @@ The FHIR PA API that CMS-0057-F mandates is the rightmost column. All of the oth
 
 ---
 
-## What the Rule Actually Mandates
+## What the rule actually mandates
 
 CMS-0057-F (finalized January 17, 2024) applies to Medicare Advantage organizations, Medicaid and CHIP managed care plans and fee-for-service programs, and qualified health plan issuers on federally-facilitated exchanges. It requires four FHIR R4 APIs, all due January 1, 2027, with operational PA decision-time requirements already in effect since January 1, 2026.
 
@@ -69,7 +69,7 @@ The two obligations that were already in effect as of January 1, 2026 are the PA
 
 ---
 
-## Where the Da Vinci IGs Fit
+## Where the Da Vinci IGs fit
 
 The Da Vinci CRD, DTR, and PAS implementation guides are the most-discussed part of the rule in interoperability circles, and it is worth being precise about their regulatory status. CMS lists all three in Table H3 of the final rule as strongly recommended but not required. The binding standards are FHIR R4.0.1, US Core STU 3.1.1, and SMART on FHIR. The Da Vinci IGs describe one way to implement the Prior Authorization API's required capabilities, and it is a well-designed way, but a payer can satisfy the regulatory requirement without implementing CRD, DTR, or PAS specifically.
 
@@ -102,7 +102,7 @@ The Prior Authorization API's four required capabilities, which are determining 
 
 ---
 
-## The Pended Request Path
+## The pended request path
 
 For requests that require manual clinical review, the PAS IG defines a subscription-based notification path using the R4 Subscriptions Backport implementation guide. The synchronous response returns a pended status, and the final determination arrives via a rest-hook notification with the full PAS Response Bundle. The EHR is expected to monitor pended requests until they reach a final state.
 
@@ -158,7 +158,7 @@ sequenceDiagram
 
 ---
 
-## Key Dates
+## Key dates
 
 | Obligation | Effective Date |
 |---|---|
