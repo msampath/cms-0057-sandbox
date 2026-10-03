@@ -141,13 +141,15 @@ function buildCoverageInformationAction({
   categoryDefault,
   hardStop,
   orderId,
-  unreadableOrder
+  unreadableOrder,
+  noRuleList
 }) {
   // pa-needed mapping:
   //   no-PA rule           → 'no-auth'
   //   auth-needed @ Phase 2 → 'auth-needed'
   //   gold card             → 'satisfied', with the program as the PA id
   //   auth-needed @ Phase 4 → 'satisfied' (emitted in pas/submit, not here)
+  //   unreadable code, or no rule list loaded for the plan → 'indeterminate'
   // The order must agree with the card: a gold card is covered, and a
   // category default carries its own covered value.
   const covered =
@@ -155,8 +157,8 @@ function buildCoverageInformationAction({
       ? 'covered'
       : hardStop
       ? 'not-covered'
-      : unreadableOrder
-      ? 'conditional'
+      : unreadableOrder || noRuleList
+      ? 'indeterminate'
       : !rule && categoryDefault
       ? categoryDefault.default_rule?.covered || 'covered'
       : rule?.managed_by === 'Carelon-or-BCBSIL-conditional' && !routing.reason
@@ -174,7 +176,13 @@ function buildCoverageInformationAction({
       coverageId,
       covered,
       paNeeded: paNeededValue,
-      satisfiedPaId: goldCard ? `GOLDCARD-${String(goldCard.program_name || 'program').replace(/[^A-Za-z0-9]+/g, '-').toUpperCase()}` : null
+      satisfiedPaId: goldCard ? `GOLDCARD-${String(goldCard.program_name || 'program').replace(/[^A-Za-z0-9]+/g, '-').toUpperCase()}` : null,
+      // The reason an indeterminate answer must carry (lib/fhir.js).
+      reasonText: unreadableOrder
+        ? 'The order has no code the payer can read'
+        : noRuleList
+        ? 'No authorization list is loaded for this plan'
+        : undefined
     })
   };
 }
@@ -250,6 +258,10 @@ async function handlePOST(request) {
     !goldCard && !rule && !categoryDefault && !unreadableOrder
       ? (db.plans || []).find((p) => p.plan_type === planType && p.requires_pa_by_default) || null
       : null;
+  // No rule list is loaded for this plan (no Medicaid grid is ingested), so
+  // a code that no step above answers cannot be evaluated. The answer is
+  // indeterminate, not no-auth.
+  const noRuleList = rules.length === 0 && !goldCard && !categoryDefault && !planDefault && !unreadableOrder;
 
   // Diagnoses travel with the hook as Condition resources (R4 Patient has
   // no condition element).
@@ -315,6 +327,22 @@ async function handlePOST(request) {
         'Resend the order with a CPT or HCPCS code to get a coverage answer.',
       source: sourceForRule(rule)
     };
+  } else if (noRuleList) {
+    card = {
+      summary: 'No authorization list is loaded for this plan, so the sandbox cannot confirm whether authorization is required.',
+      indicator: 'warning',
+      source: sourceForRule(rule),
+      // The request can still be sent: the generic questionnaire opens, and the
+      // PAS submission pends for manual review (app/api/pas/submit/route.js).
+      links: [
+        {
+          label: 'Launch DTR SMART App',
+          url: `/dtr/launch?questionnaire=fallback-medical-necessity&code=${encodeURIComponent(orderedCode || '')}`,
+          type: 'smart',
+          appContext: JSON.stringify({ questionnaireId: 'fallback-medical-necessity', cqlLibraryId: null, orderedCode, managedBy: routing.vendor })
+        }
+      ]
+    };
   } else if (!rule) {
     card = {
       summary: 'Code not on the active PA grid',
@@ -367,8 +395,8 @@ async function handlePOST(request) {
   // ----- Build coverage-information system action -------------------------
   const paNeededValue = goldCard
     ? 'satisfied'
-    : unreadableOrder
-    ? 'conditional'
+    : unreadableOrder || noRuleList
+    ? 'indeterminate'
     : !rule && categoryDefault
     ? categoryDefault.default_rule?.pa_needed || 'no-auth'
     : planDefault
@@ -390,7 +418,8 @@ async function handlePOST(request) {
     // The hard-stop card blocks a non-covered order, so the order says so.
     hardStop: card?.indicator === 'hard-stop',
     orderId: draftOrderId,
-    unreadableOrder
+    unreadableOrder,
+    noRuleList
   });
 
   // This log line is the visible "machine-readable PA determination" moment

@@ -160,6 +160,28 @@ const ORDER_OPTIONS = [
     conditions: [],
     drug: 'certolizumab',
     siteOfCare: 'self'
+  },
+  // The default order for Warren McGinnis (Epic sandbox). The 2026 Medicare
+  // Advantage grid lists 22612.
+  {
+    label: '22612 Lumbar spine fusion',
+    code: '22612',
+    category: null,
+    conditions: [
+      {
+        resourceType: 'Condition',
+        clinicalStatus: { coding: [{ code: 'active' }] },
+        code: {
+          coding: [
+            {
+              system: 'http://hl7.org/fhir/sid/icd-10-cm',
+              code: 'M43.16',
+              display: 'Spondylolisthesis, lumbar region'
+            }
+          ]
+        }
+      }
+    ]
   }
 ];
 
@@ -371,6 +393,11 @@ function epicPatientDisplayName(patient) {
   );
 }
 
+// Warren McGinnis carries Medicare Advantage coverage, member ID MBR-7316,
+// and the lumbar spine fusion order. The other Epic test patients keep the
+// commercial coverage in buildEpicScenario.
+const WARREN_EPIC_ID = 'e0w0LEDCYtfckT6N.CkJKCw3';
+
 // Turns a fetched Epic Patient resource into the same "scenario" shape
 // buildPatientResource/buildCoverageResource/buildPractitionerResource
 // already consume for the four demo patients (see lib/patients.js).
@@ -383,7 +410,7 @@ function buildEpicScenario(epicResult, fhirId) {
   const family = patient?.name?.[0]?.family || 'Patient';
   const given = patient?.name?.[0]?.given || ['Epic'];
   const memberSuffix = fhirId.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase();
-  return {
+  const scenario = {
     id: fhirId,
     patientId: fhirId,
     name: epicPatientDisplayName(patient) || 'Epic Sandbox Patient',
@@ -405,6 +432,16 @@ function buildEpicScenario(epicResult, fhirId) {
     defaultOrderIndex: 5,
     presetCode: ''
   };
+  if (fhirId === WARREN_EPIC_ID) {
+    Object.assign(scenario, {
+      planType: 'MA-PPO',
+      planName: 'Medicare Advantage PPO',
+      coverageId: `cov-ma-ppo-bcbsil-epic-${memberSuffix}`,
+      subscriberId: 'MBR-7316',
+      defaultOrderIndex: ORDER_OPTIONS.findIndex((o) => o.code === '22612')
+    });
+  }
+  return scenario;
 }
 
 // ---- Page ------------------------------------------------------------------
@@ -1872,7 +1909,9 @@ export default function EhrDashboard() {
               </button>
             </div>
 
-            {scenarioId === 'epic-patient' && (
+            {/* The Epic pre-population runs the MRI Brain (70553) library, so
+                the panel shows only for that order. */}
+            {scenarioId === 'epic-patient' && order.code === '70553' && (
               <div className="mb-5 bg-teal-50 border border-teal-300 rounded-lg p-4">
                 <div className="flex justify-between items-start mb-2">
                   <div>
@@ -1970,8 +2009,10 @@ export default function EhrDashboard() {
             </form>
 
             <p className="text-xs text-gray-500 mt-4">
-              CQL shown is illustrative. The simulator does not execute CQL;
-              pre-population values are hardcoded to match the logic shown.
+              For MRI Brain orders on the Epic path, the CQL library runs on patient data fetched
+              from Epic&apos;s sandbox. In mock mode it runs on authored test data. The other CQL
+              shown is illustrative, and the built-in demo patients&apos; values are pre-filled to
+              match the logic shown.
             </p>
           </div>
 

@@ -375,12 +375,30 @@ async function phase3() {
   const bareLog = (await logsFor(/^FHIR RESPONSE$/))[0];
   check('PAS without planType uses the member plan (QHP clock)', bareLog?.clock?.hours === 72 && bareLog?.clock?.proposed === true);
 
-  // Medicaid has no ingested grid, so J0717 is not on it.
+  // Medicaid has no ingested grid, so no rule list is loaded for the plan.
   const medHook = await post('/api/cds-services/order-sign', {
     hook: 'order-sign', hookInstance: 'reg-3', code: 'J0717', planType: 'MEDICAID-MCO',
     practitionerNpi: '1234567890', patientId: 'pat-5520-maria-santos', patient: { id: 'pat-5520-maria-santos' }
   });
-  check('Medicaid: no grid rule matches (no Medicaid grid ingested)', /not on the active PA grid/i.test(medHook.json?.cards?.[0]?.summary || ''), medHook.json?.cards?.[0]?.summary);
+  const medOrder = medHook.json?.systemActions?.[0]?.resource;
+  check('Medicaid: no rule list loaded → the no-list card, covered and pa-needed indeterminate',
+    medHook.json?.cards?.[0]?.summary === 'No authorization list is loaded for this plan, so the sandbox cannot confirm whether authorization is required.' &&
+    ciPart(medOrder, 'covered')?.valueCode === 'indeterminate' && ciPart(medOrder, 'pa-needed')?.valueCode === 'indeterminate',
+    JSON.stringify([medHook.json?.cards?.[0]?.summary, ciParts(medOrder)]));
+  const medLink = medHook.json?.cards?.[0]?.links?.[0];
+  check('Medicaid no-list card: the DTR launch link opens the generic questionnaire, so the request can still be sent',
+    medLink?.type === 'smart' && medLink?.label === 'Launch DTR SMART App' &&
+    JSON.parse(medLink?.appContext || '{}').questionnaireId === 'fallback-medical-necessity', JSON.stringify(medLink));
+
+  // A request sent anyway pends for manual review, and the review timers do not finalize it.
+  const medBundle = pasBundle('70553', {}, 'MEDICAID-MCO');
+  medBundle.entry[0].resource.id = 'pat-5520-maria-santos';
+  const medCr = (await post('/api/pas/submit', medBundle)).json?.entry?.[0]?.resource;
+  check('Medicaid PAS: pends (A4) for manual review with the no-list text',
+    review(medCr)?.action === 'A4' && medCr?.disposition === 'No authorization list is loaded for this plan; sent for manual review', medCr?.disposition);
+  await sleep(8500);
+  const medHeld = await call('/api/pas/pended/' + medCr?.preAuthRef);
+  check('Medicaid PAS: still pended after the review window, not finalized automatically', medHeld.status === 200 && medHeld.json?.status === 'pended', medHeld.json?.status);
 }
 
 const PDEX_PA = 'http://hl7.org/fhir/us/davinci-pdex/StructureDefinition/pdex-priorauthorization';
@@ -815,11 +833,12 @@ async function hardening() {
   const snomedDraft = { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'sr-spec-5', code: { coding: [{ system: 'http://snomed.info/sct', code: '70553' }] } } }] };
   const snomed = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-5', context: { patientId: 'pat-8849-jane-doe', draftOrders: snomedDraft } })).json;
   const snomedOrder = snomed?.systemActions?.[0]?.resource;
-  check('a draft order coded outside CPT or HCPCS gets the could-not-read card and a conditional answer',
-    snomed?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedOrder, 'pa-needed')?.valueCode === 'conditional', snomed?.cards?.[0]?.summary);
+  check('a draft order coded outside CPT or HCPCS gets the could-not-read card and an indeterminate answer (covered and pa-needed)',
+    snomed?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedOrder, 'pa-needed')?.valueCode === 'indeterminate' &&
+    ciPart(snomedOrder, 'covered')?.valueCode === 'indeterminate', snomed?.cards?.[0]?.summary);
   const snomedHmo = (await post('/api/cds-services/order-sign', { hook: 'order-sign', planType: 'COMM-HMO', practitionerNpi: '1234567890', hookInstance: 'reg-spec-5b', context: { patientId: 'pat-6614-marcus-johnson', draftOrders: snomedDraft } })).json;
   check('on a PA-by-default plan, an unreadable code still gets the could-not-read card (card and order agree)',
-    snomedHmo?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedHmo?.systemActions?.[0]?.resource, 'pa-needed')?.valueCode === 'conditional', snomedHmo?.cards?.[0]?.summary);
+    snomedHmo?.cards?.[0]?.summary === 'Ordered code could not be read' && ciPart(snomedHmo?.systemActions?.[0]?.resource, 'pa-needed')?.valueCode === 'indeterminate', snomedHmo?.cards?.[0]?.summary);
   const medOnly = (await post('/api/cds-services/order-sign', { ...hookBase, hookInstance: 'reg-spec-5c', context: { patientId: 'pat-8849-jane-doe', draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'MedicationRequest', id: 'm2' } }] } } })).json;
   check('draft orders with only a MedicationRequest get the could-not-read card, not no-auth', medOnly?.cards?.[0]?.summary === 'Ordered code could not be read', medOnly?.cards?.[0]?.summary);
   const objType = pasBundle('70553');
@@ -872,6 +891,14 @@ async function hardening() {
   const hsRes = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h3', code: '70553', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, 'hard-stop-trigger': true })).json;
   const hsOrder = hsRes?.systemActions?.[0]?.resource;
   check('hard stop: order not-covered, no pa-needed', hsRes?.cards?.[0]?.indicator === 'hard-stop' && ciPart(hsOrder, 'covered')?.valueCode === 'not-covered' && !ciPart(hsOrder, 'pa-needed'));
+  // crd-ci-q9: an indeterminate answer carries a reason (text only, crd-ci-q7). No other answer gets one.
+  const reasonsOf = (order) => ciParts(order).filter((e) => e.url === 'reason');
+  const textOnlyReason = (order, text) => reasonsOf(order).length === 1 && reasonsOf(order)[0].valueCodeableConcept?.text === text && !reasonsOf(order)[0].valueCodeableConcept?.coding;
+  const noListOrder = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-r1', code: '70553', planType: 'MEDICAID-MCO', practitionerNpi: '1234567890', patientId: 'pat-5520-maria-santos', patient: { id: 'pat-5520-maria-santos' } })).json?.systemActions?.[0]?.resource;
+  check('an indeterminate answer carries a text-only reason, and no other covered or pa-needed value gets one',
+    textOnlyReason(noListOrder, 'No authorization list is loaded for this plan') && textOnlyReason(snomedOrder, 'The order has no code the payer can read') &&
+    [goldOrder, drugOrder, ppo?.systemActions?.[0]?.resource, hmoOrder, hsOrder].every((o) => !!o && reasonsOf(o).length === 0),
+    JSON.stringify([reasonsOf(noListOrder), reasonsOf(snomedOrder)]));
   const draft = (await post('/api/cds-services/order-sign', { hook: 'order-sign', hookInstance: 'reg-h4', code: '70553', planType: 'COMM-PPO', practitionerNpi: '1234567890', patientId: 'pat-8849-jane-doe', patient: { id: 'pat-8849-jane-doe' }, context: { draftOrders: { resourceType: 'Bundle', entry: [{ resource: { resourceType: 'ServiceRequest', id: 'draft-sr-1' } }] } } })).json;
   check('the update targets the draft order id', draft?.systemActions?.[0]?.resource?.id === 'draft-sr-1' && draft.systemActions[0].resource.status === 'draft');
   // Live decisions under an NPI the seed never uses: approve, deny, pend.

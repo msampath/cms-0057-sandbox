@@ -32,7 +32,12 @@ const PROPOSED_ADDITIONS = [
   },
   {
     cite: 'Proposed CMS-0062-P',
-    feature: 'Proposed drug PA on the medical benefit through CRD → DTR → PAS. Both benefit tracks share one question set, decision, and coded denial reason. Certolizumab is on the BCBSIL grid as HCPCS J0717, "not for use when drug is self administered".',
+    feature: 'Drug PA on the medical benefit through CRD, DTR and PAS.',
+    where: '/ehr: clinic-administered certolizumab order'
+  },
+  {
+    cite: 'My position',
+    feature: 'One question set, one decision and one coded denial reason across both drug tracks.',
     where: '/ehr: clinic-administered certolizumab order'
   },
   {
@@ -57,12 +62,22 @@ const PROPOSED_ADDITIONS = [
   },
   {
     cite: 'Proposed CMS-0062-P',
-    feature: 'Proposed reporting includes an endpoint report of base FHIR Endpoint resources, API usage with third-party error rates, and PA metrics as counts and percentages.',
+    feature: 'An endpoint report of FHIR Endpoint resources, API usage reporting, and PA metrics as counts and percentages.',
+    where: '/um Registry & Metrics tab'
+  },
+  {
+    cite: 'My position',
+    feature: 'Third-party connection success and error rates.',
     where: '/um Registry & Metrics tab'
   },
   {
     cite: 'Proposed 45 CFR 162.1302(g)(2)(vii)',
-    feature: 'CDex 2.1.0 solicited attachments appear on pended requests. A simulated clearinghouse rejects a nonconforming PAS Bundle before it reaches the payer.',
+    feature: 'CDex attachments on pended requests.',
+    where: '/ehr: pended 15820 order and the DTR pane clearinghouse toggle'
+  },
+  {
+    cite: 'Sandbox addition',
+    feature: 'A clearinghouse gate that rejects a nonconforming PAS Bundle before it reaches the payer.',
     where: '/ehr: pended 15820 order and the DTR pane clearinghouse toggle'
   }
 ];

@@ -265,6 +265,71 @@ export async function handlePOST(request) {
     });
   };
 
+  // No rule list is loaded for this plan (no Medicaid grid is ingested), so
+  // the payer cannot evaluate the request. It pends for manual review and is
+  // never finalized automatically (lib/pendedReview.js).
+  if (rules.length === 0) {
+    const authNumber = nextRequestId('AUTH');
+    const disposition = 'No authorization list is loaded for this plan; sent for manual review';
+
+    const pendedClaimResponse = {
+      resourceType: 'ClaimResponse',
+      id: `cr-${Date.now()}`,
+      meta: { profile: [PAS_PROFILES.claimResponse] },
+      status: 'active',
+      type: claimType,
+      use: 'preauthorization',
+      patient: { reference: patientRef },
+      created: new Date().toISOString(),
+      outcome: 'complete',
+      disposition,
+      preAuthRef: authNumber,
+      insurer: { display: vendor },
+      item: claimResponseItems(claim, {
+        action: REVIEW_ACTIONS.pended,
+        number: authNumber
+      })
+    };
+
+    logTransaction('Legacy UM Mainframe', 'X12 278 RESPONSE (PENDED)',
+      `Decision: PENDED. HCR*A4. Auth # ${authNumber}.\n\n${generateX12_278_Response({
+        receiverId: getReceiverId(vendor),
+        authNumber,
+        action: REVIEW_ACTIONS.pended.code
+      })}`,
+      logMeta
+    );
+
+    addPendingRequest(authNumber, {
+      authNumber,
+      vendor,
+      patientId: patient?.id || 'unknown',
+      npi: logMeta.npi,
+      patientRef,
+      orderedCode,
+      claimItems: (Array.isArray(claim?.item) ? claim.item : []).map((it) => ({ sequence: it?.sequence })),
+      coverageId,
+      claimType,
+      clock,
+      planType,
+      receivedAt,
+      category: drugKey ? 'drug' : 'item',
+      // A person decides. No review window or attachment finalizes it.
+      manualReview: true
+    });
+
+    logTransaction('PAS Gateway', 'PA PENDED',
+      `Auth # ${authNumber}: ${disposition}.\n\n${JSON.stringify(pendedClaimResponse, null, 2)}`,
+      {
+        ...logMeta,
+        clock,
+        pa: { requestId: authNumber, category: drugKey ? 'drug' : 'item', benefit: 'medical', determination: 'pended', planType, receivedAt }
+      }
+    );
+
+    return NextResponse.json(wrapPasResponseBundle([pendedClaimResponse]));
+  }
+
   // Denials: the _simulateDenial debug flag from the EHR, or a drug
   // decision that did not meet criteria.
   if (bundle._simulateDenial || drugDecision?.determination === 'denied') {
