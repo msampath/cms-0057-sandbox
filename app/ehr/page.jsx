@@ -928,17 +928,21 @@ export default function EhrDashboard() {
 
       // Availity Coverages: verify the patient has active eligibility at
       // the payer via a real clearinghouse call (X12 270/271). Fires
-      // alongside the CRD hook, non-blocking.
-      setAvailityLoading(true);
-      fetch(apiUrl('/api/availity/coverage-check'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientId: patient.id })
-      })
-        .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
-        .then((result) => { if (thisSign()) setAvailityResult(result); })
-        .catch((err) => { if (thisSign()) setAvailityResult({ ok: false, json: { error: err.message } }); })
-        .finally(() => { if (thisSign()) setAvailityLoading(false); });
+      // alongside the CRD hook, non-blocking. Skipped for Epic sandbox
+      // identities: the endpoint only knows the six demo patients, so the
+      // call would always fail with "Unknown patientId".
+      if (scenarioId !== 'epic-patient') {
+        setAvailityLoading(true);
+        fetch(apiUrl('/api/availity/coverage-check'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patientId: patient.id })
+        })
+          .then(async (r) => ({ ok: r.ok, status: r.status, json: await r.json() }))
+          .then((result) => { if (thisSign()) setAvailityResult(result); })
+          .catch((err) => { if (thisSign()) setAvailityResult({ ok: false, json: { error: err.message } }); })
+          .finally(() => { if (thisSign()) setAvailityLoading(false); });
+      }
     }
   };
 

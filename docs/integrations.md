@@ -21,7 +21,7 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 1. CDS Hooks Sandbox: no signup. Paste `https://surakshith.com/cms-0057/api/cds-services` into their Services config. Done in about a minute.
 2. SMART App Launcher: no signup. Paste `https://surakshith.com/cms-0057/ehr/launch` into the App Launch URL field and click Launch. Done in about a minute.
 3. Inferno by ONC: no signup, but running the PAS test kit takes a few minutes to configure and execute.
-4. Availity Coverages: already registered and live (see Section 5). Fires from `/ehr` on every order sign as a real X12 270/271 eligibility check.
+4. Availity Coverages: already registered and live (see Section 5). Fires from `/ehr` on every order sign for the six demo patients as a real X12 270/271 eligibility check. Epic sandbox identities skip it, because Availity's demo data does not know them.
 5. Epic on FHIR, SMART launch: already registered (see Section 4). No further work unless the app is deleted or Epic changes their sandbox model to expose a self-serve EHR launcher for CMS Prior Auth apps.
 6. Epic Backend Services: already registered and live (see Section 4a). Nothing further to do.
 7. Optum: already registered and live (see Section 6). Nothing further to do.
@@ -195,7 +195,7 @@ Availity is the largest US healthcare clearinghouse. Their [Coverages API](https
 
 This was originally built against Availity's Service Reviews API (X12 278 prior authorization) but pivoted to Coverages after empirical testing revealed our developer credentials are subscribed to the "Healthcare HIPAA Transactions - Demo" product, which includes Coverages but not Service Reviews. Correcting the OAuth scope alone did not fix it because the product itself did not carry that API.
 
-The Coverages check fires from `/ehr` on every order sign, alongside the CDS Hooks card and Optum's second CRD opinion. That matches real workflow because eligibility is naturally a pre-order verification. The result renders in its own sky-blue panel next to the CDS card.
+The Coverages check fires from `/ehr` on every order sign for the six demo patients, alongside the CDS Hooks card and Optum's second CRD opinion. That matches real workflow because eligibility is naturally a pre-order verification. The result renders in its own sky-blue panel next to the CDS card. Epic sandbox identities skip the check, because Availity's demo data does not know them.
 
 Mode indicator on each response:
 
