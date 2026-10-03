@@ -17,7 +17,7 @@ The spec references: Da Vinci PDex IG (Payer Data Exchange), US Core STU 3.1.1 p
 
 ### What this covers
 - A provider queries by their NPI and receives, for each attributed patient: current coverage, PA decisions (open, approved, pended, denied), formulary placement, and the clinical note that accompanied the authorization.
-- The provider does not need to know the patient is a member; the payer surfaces the panel.
+- The provider does not need to know the patient is a member. The payer surfaces the panel.
 
 ### Open research questions
 1. Which Da Vinci PDex IG version applies? (PDex STU 2.0 is the current; the rule references it but enforcement language needs checking: does it require PDex or just US Core-aligned claims?)
@@ -43,13 +43,13 @@ The spec references: Da Vinci PDex IG (Payer Data Exchange), US Core STU 3.1.1 p
 ## API 2: Patient Access API
 
 ### What the rule says
-45 CFR 156.221(a) (QHP issuers), 156.226 (Medicaid), and companion provisions require payers to expose a FHIR R4 endpoint that allows patients and their apps to retrieve their own claims, prior authorizations, coverage, and clinical data. Effective Jan 1, 2027 (PA data specifically; some clinical data requirements were already in place under prior rules).
+45 CFR 156.221(a) (QHP issuers), 156.226 (Medicaid), and companion provisions require payers to expose a FHIR R4 endpoint that allows patients and their apps to retrieve their own claims, prior authorizations, coverage, and clinical data. Effective Jan 1, 2027 (PA data specifically: some clinical data requirements were already in place under prior rules).
 
 The spec references: Da Vinci PDex IG, US Core STU 3.1.1, SMART on FHIR v2 (patient launch). The patient authenticates with the payer's identity portal and authorizes a third-party app (e.g., Apple Health, CommonHealth) to retrieve their data.
 
 ### What this covers
 - A patient queries their own data: coverage details (plan name, benefit year, cost sharing), claims and EOBs, PA decisions (what was requested, what was approved/denied, appeal rights if denied), and clinical notes associated with their authorizations.
-- The USCDI on FHIR layer (US Core profiles) overlaps significantly; clinical data like conditions, medications, and allergies may already be present from the EHR's record.
+- The USCDI on FHIR layer (US Core profiles) overlaps significantly. Clinical data like conditions, medications, and allergies may already be present from the EHR's record.
 
 ### Open research questions
 1. Does the final rule specify ExplanationOfBenefit (EOB) as mandatory, or is ClaimResponse sufficient for PA-specific data? (CARIN Blue Button uses EOB; Da Vinci PDex uses it too, but is it mandated for PA-only flows?)
@@ -86,7 +86,7 @@ The spec references: Da Vinci PDex IG (the `$member-match` operation + bulk FHIR
 - BCBSIL ingests the bundle and makes it available in the member's record going forward.
 
 ### Open research questions
-1. Is the $member-match operation exactly as defined in PDex STU 2.0, or did the final rule introduce variations? (PDex defines it as `POST /Patient/$member-match` with a Parameters body containing `MemberPatient` and `CoverageToMatch`; confirm this is what CMS mandates.)
+1. Is the $member-match operation exactly as defined in PDex STU 2.0, or did the final rule introduce variations? (PDex defines it as `POST /Patient/$member-match` with a Parameters body containing `MemberPatient` and `CoverageToMatch`. Confirm this is what CMS mandates.)
 2. Is bulk FHIR ($export) required, or can individual resource queries suffice? (Bulk FHIR is the practical path for large member histories, but individual queries may be acceptable for the mandate.)
 3. What is the consent mechanism? The rule requires member consent for the data exchange. Is this captured in a FHIR Consent resource, or is an out-of-band consent (enrollment form) sufficient?
 4. What is the "prior payer data" scope: all claims and PA decisions, or clinical data too? (The five-year lookback suggests clinical history, not just PA records.)
@@ -116,7 +116,7 @@ The spec references: Da Vinci PDex IG (the `$member-match` operation + bulk FHIR
 
 2. NPI linkage: the transaction log currently records CRD events with actor strings ("CRD Engine", "PAS Gateway") but not the practitioner NPI from the CDS hook payload. Provider Access needs NPI in the log. The CDS hook payload (`prefetch.practitioner`) carries the NPI, which needs to be extracted and logged in `app/api/cds-services/order-sign/route.js`.
 
-3. Patient ID consistency: patient IDs in the EHR scenarios need to be stable and match across the transaction log, provider access panel, and patient access surface. Currently `patient.id` flows from the FHIR bundle; confirm all four scenarios produce consistent IDs.
+3. Patient ID consistency: patient IDs in the EHR scenarios need to be stable and match across the transaction log, provider access panel, and patient access surface. Currently `patient.id` flows from the FHIR bundle. Confirm all four scenarios produce consistent IDs.
 
 4. Prior plan seed data: Payer-to-Payer needs realistic prior-plan history. The simplest approach is a static `priorHistory` map keyed by patient ID with a prior payer name, plan ID, and two or three example prior PA decisions (including one denial and one approval). This goes in `lib/db.js` alongside the existing defaultData.
 

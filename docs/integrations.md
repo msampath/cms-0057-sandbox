@@ -14,7 +14,7 @@ Base URL for everything below: `https://surakshith.com/cms-0057`.
 | [Epic Backend Services](#4a-epic-backend-services-reading-epics-own-test-patients) | EHR-facing (outbound) | Yes | Yes: live token exchange, real Patient resources read |
 | [Epic on FHIR, SMART launch](#4-epic-on-fhir) | EHR-facing (inbound) | Yes | Registered, OAuth accepts client; live launch limited by Epic sandbox |
 | [Availity Coverages](#5-availity-coverages-eligibility-clearinghouse) | Clearinghouse (outbound) | Yes | Yes: live X12 270/271 eligibility calls against Availity's real sandbox |
-| [Optum](#6-optum-real-payer-api) | Payer-facing (outbound) | Yes | Yes for the CRD → DTR → PAS chain. Provider Access `$bulk-member-match` and `$davinci-data-export` return 400 / 405 against the live sandbox in shapes the OAS does not explain; mock mode covers both end to end. |
+| [Optum](#6-optum-real-payer-api) | Payer-facing (outbound) | Yes | Yes for the CRD → DTR → PAS chain. Provider Access `$bulk-member-match` and `$davinci-data-export` return 400 / 405 against the live sandbox in shapes the OAS does not explain. Mock mode covers both end to end. |
 
 ## Setup order, quickest first
 
@@ -76,7 +76,7 @@ Public client, PKCE, no secret. Same shape works against any conformant SMART v2
 
 ## 4a. Epic Backend Services (reading Epic's own test patients)
 
-Working, live, verified with real data. Separate from the SMART launch work in Section 4 below, the sandbox is also an outbound SMART Backend Services client to Epic: it signs a `client-confidential-asymmetric` JWT assertion with its own RS384 keypair (the same one behind `/api/.well-known/jwks.json`) and exchanges it for a token at Epic's `client_credentials` endpoint, then reads a `Patient` resource. This is the path Epic's own Developer Testing Guide documents for backend apps connecting to the sandbox. The standalone/EHR-launch paths in Section 4 do not grant resource scopes to third-party apps in the public sandbox, confirmed empirically in an earlier session; this path does.
+Working, live, verified with real data. Separate from the SMART launch work in Section 4 below, the sandbox is also an outbound SMART Backend Services client to Epic: it signs a `client-confidential-asymmetric` JWT assertion with its own RS384 keypair (the same one behind `/api/.well-known/jwks.json`) and exchanges it for a token at Epic's `client_credentials` endpoint, then reads a `Patient` resource. This is the path Epic's own Developer Testing Guide documents for backend apps connecting to the sandbox. The standalone/EHR-launch paths in Section 4 do not grant resource scopes to third-party apps in the public sandbox, confirmed empirically in an earlier session. This path does.
 
 Registration: a third Epic app, Backend Systems audience, General use case, Non-Production JWK Set URL pointed at `https://surakshith.com/cms-0057/api/.well-known/jwks.json`, Incoming APIs `Patient.Read` and `Coverage.Read`. Non-production client id set as `EPIC_BACKEND_CLIENT_ID` on Cloud Run.
 
@@ -162,7 +162,7 @@ Tested against both registrations, both use cases, both non-prod and prod client
 |---|---|---|
 | Authorize call to Epic | Accepted, ticket generated | Rejected outright |
 | Reaches Hyperspace login page | Yes | No |
-| Resource scopes granted (`patient/Patient.read` etc.) | No, silently stripped; only `openid fhirUser` kept | N/A |
+| Resource scopes granted (`patient/Patient.read` etc.) | No: silently stripped, only `openid fhirUser` kept | N/A |
 | Login proceeds | No, "Invalid OAuth 2.0 request." with the remaining scopes | N/A |
 
 The root cause is Epic's intentional business model, not a scope-name issue we can code around: the public sandbox validates that an app can authenticate but does not grant FHIR resource read scopes to third-party developer apps. Reading actual patient data from Epic requires a customer relationship, an Epic Community Member willing to deploy the app against their non-production or production Epic environment.
@@ -228,7 +228,7 @@ The client is at `lib/availity.js` and the outbound endpoint is `app/api/availit
 
 ## 6. Optum real payer API
 
-Working, live, verified with real data. Unlike Epic (an EHR vendor's sandbox) and Availity (a clearinghouse), Optum's sandbox is a second, independent payer's own implementation of the same CMS-0057-F APIs this sandbox implements. The same FHIR Bundle this sandbox's own engine adjudicates is also submitted to a real UnitedHealthcare-shaped Da Vinci PAS implementation, and both results render side by side.
+Working, live, verified with real data. Unlike Epic (an EHR vendor's sandbox) and Availity (a clearinghouse), Optum's sandbox is a second, independent payer's own implementation of the same CMS-0057-F APIs this sandbox implements. That makes it the closest thing this project has to a real payer-to-payer interoperability proof. The same FHIR Bundle this sandbox's own engine adjudicates is also submitted to a real UnitedHealthcare-shaped Da Vinci PAS implementation, and both results render side by side.
 
 Four operations are wired in, covering the full CRD → DTR → PAS chain plus Provider Access:
 
@@ -243,7 +243,7 @@ Four operations are wired in, covering the full CRD → DTR → PAS chain plus P
 
 Mode indicator on each response, same convention as Availity: `live`, `mock-no-credentials`, `mock-forced`, `disabled` (`OPTUM_ENABLED=off`). The panels in `/ehr` and `/um` label it for people rather than printing the mode: "Optum sandbox response" when `live`, and "Optum sandbox response (saved copy)" in either mock mode, since no call is made then (`lib/integrationLabel.js`). Availity panels follow the same rule.
 
-Three real quirks in Optum's own documentation, found only by empirical testing against the live sandbox:
+Three real quirks Optum's own documentation got wrong, found only by empirical testing against the live sandbox:
 
 - Token endpoint rejects the documented request shape: Optum's own API Setup page shows a JSON body (`{"client_id":..., "client_secret":..., "grant_type":"client_credentials"}`). The real endpoint returns `400 Missing form parameter: grant_type` against that body. It actually wants `application/x-www-form-urlencoded`, the same shape as Epic and Availity's token requests.
 - CDS Hooks invocation path does not match Optum's own discovery response: `GET .../api/cds-services` lists the order-sign service with `"id": "coverageRequirements-serviceRequest"`. Appending that id to the discovery URL, the standard CDS Hooks convention this sandbox's own `/api/cds-services/order-sign` follows, returns `400 payerId or lob path param is missing` on every attempt: POST with a real order, POST empty, and even a bare GET. The real invocation path is `.../api/cds-services/crd-order-sign`, a literal that does not appear anywhere in the discovery response.
