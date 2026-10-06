@@ -444,6 +444,24 @@ function buildEpicScenario(epicResult, fhirId) {
   return scenario;
 }
 
+// The patient an external EHR launched us with (SMART App Launcher, Epic).
+// Same demo blend as buildEpicScenario: real identity from the launching
+// EHR's Patient read, synthesized BCBSIL commercial coverage, since the
+// launching EHR's test data carries no BCBSIL coverage.
+function buildLaunchedScenario(patient, session) {
+  const fhirId = session.patientId || patient?.id || 'launched';
+  const host = new URL(session.iss).host;
+  return {
+    ...buildEpicScenario({ patient }, fhirId),
+    tag: 'SMART launch',
+    tagColor: 'bg-emerald-100 text-emerald-800',
+    borderColor: 'border-emerald-500',
+    coverageId: `cov-comm-ppo-bcbsil-smart-${fhirId.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase()}`,
+    subscriberId: `BCBSIL-MEM-SMART-${fhirId.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase()}`,
+    description: `Patient launched from ${host}. Coverage, member ID, and ordering NPI are synthesized for this demo.`
+  };
+}
+
 // ---- Page ------------------------------------------------------------------
 export default function EhrDashboard() {
   const [scenarioId, setScenarioId] = useState('jane-doe');
@@ -451,10 +469,19 @@ export default function EhrDashboard() {
   // below (see the "Use ... for the PA order flow" button). Fetching a
   // preview in that panel does not change this on its own.
   const [epicScenario, setEpicScenario] = useState(null);
+  const [launchedSession, setLaunchedSession] = useState(null);
+  const [launchedPatient, setLaunchedPatient] = useState(null);
+  const launchedScenario = useMemo(
+    () => (launchedSession && launchedPatient ? buildLaunchedScenario(launchedPatient, launchedSession) : null),
+    [launchedSession, launchedPatient]
+  );
   const scenario = useMemo(() => {
     if (scenarioId === 'epic-patient' && epicScenario) return epicScenario;
-    return PATIENT_SCENARIOS.find((s) => s.id === scenarioId);
-  }, [scenarioId, epicScenario]);
+    if (scenarioId === 'smart-patient' && launchedScenario) return launchedScenario;
+    return PATIENT_SCENARIOS.find((s) => s.id === scenarioId) || PATIENT_SCENARIOS[0];
+  }, [scenarioId, epicScenario, launchedScenario]);
+  // Patients that exist only in an external EHR, not in lib/patients.js.
+  const isExternalPatient = scenarioId === 'epic-patient' || scenarioId === 'smart-patient';
   const [selectedIndex, setSelectedIndex] = useState(5); // 70553 MRI Brain (jane-doe default)
   const [planType, setPlanType] = useState('COMM-PPO');
   // Free-text code overrides the preset dropdown when non-empty.
@@ -497,8 +524,6 @@ export default function EhrDashboard() {
   const [outdatedPas, setOutdatedPas] = useState(false);
   const [clearinghouseRejection, setClearinghouseRejection] = useState(null);
   const [wasPended, setWasPended] = useState(false);
-  const [launchedSession, setLaunchedSession] = useState(null);
-  const [launchedPatient, setLaunchedPatient] = useState(null);
   const [availityResult, setAvailityResult] = useState(null);
   const [availityLoading, setAvailityLoading] = useState(false);
   const [epicPatientId, setEpicPatientId] = useState(EPIC_TEST_PATIENTS[0].id);
@@ -648,7 +673,14 @@ export default function EhrDashboard() {
     if (!session) return;
     setLaunchedSession(session);
     fetchLaunchedPatient(session)
-      .then((p) => setLaunchedPatient(p))
+      .then((p) => {
+        setLaunchedPatient(p);
+        // The launched patient becomes the order-entry patient. Supersede
+        // any in-flight Epic fetch so its late resolution cannot switch away.
+        epicFetchReqRef.current += 1;
+        setEpicLoading(false);
+        setScenarioId('smart-patient');
+      })
       .catch(() => setLaunchedPatient(null));
   }, []);
   const [simulateDenial, setSimulateDenial] = useState(false);
@@ -929,9 +961,9 @@ export default function EhrDashboard() {
       // Availity Coverages: verify the patient has active eligibility at
       // the payer via a real clearinghouse call (X12 270/271). Fires
       // alongside the CRD hook, non-blocking. Skipped for Epic sandbox
-      // identities: the endpoint only knows the six demo patients, so the
-      // call would always fail with "Unknown patientId".
-      if (scenarioId !== 'epic-patient') {
+      // and SMART-launched identities: the endpoint only knows the six demo
+      // patients, so the call would always fail with "Unknown patientId".
+      if (!isExternalPatient) {
         setAvailityLoading(true);
         fetch(apiUrl('/api/availity/coverage-check'), {
           method: 'POST',
@@ -1458,7 +1490,9 @@ export default function EhrDashboard() {
               <div className="text-emerald-700 text-xs mt-2">
                 Scope: <code>{launchedSession.scope}</code>. This banner confirms the OAuth
                 exchange completed and a Patient resource was fetched from the launching EHR.
-                Order authoring below continues to use the sandbox&apos;s seeded scenarios.
+                {launchedPatient
+                  ? ' Order entry below uses the launched patient. The seeded scenarios stay available.'
+                  : ' The launched patient could not be read, so order entry uses the seeded scenarios.'}
               </div>
             </div>
             <button
@@ -1466,6 +1500,7 @@ export default function EhrDashboard() {
                 clearLaunchedSession();
                 setLaunchedSession(null);
                 setLaunchedPatient(null);
+                if (scenarioId === 'smart-patient') setScenarioId('jane-doe');
               }}
               className="text-xs text-emerald-800 underline hover:text-emerald-900 shrink-0"
             >
@@ -1479,6 +1514,27 @@ export default function EhrDashboard() {
       <div className="mb-6 max-w-3xl">
         <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Patient scenarios</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {launchedScenario && (
+            <button
+              onClick={() => {
+                if (scenarioId !== 'smart-patient') invalidatePrepop();
+                epicFetchReqRef.current += 1;
+                setEpicLoading(false);
+                setScenarioId('smart-patient');
+              }}
+              className={`text-left p-3 rounded-lg border-2 transition-all ${
+                scenarioId === 'smart-patient'
+                  ? `${launchedScenario.borderColor} bg-white shadow-md`
+                  : 'border-gray-200 bg-gray-50 hover:bg-white hover:border-gray-300'
+              }`}
+            >
+              <div className="font-semibold text-gray-900 text-sm">{launchedScenario.name}</div>
+              <span className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-1 ${launchedScenario.tagColor}`}>
+                {launchedScenario.tag}
+              </span>
+              <div className="text-xs text-gray-500 mt-1 leading-snug">{launchedScenario.description}</div>
+            </button>
+          )}
           {PATIENT_SCENARIOS.map((s) => (
             <button
               key={s.id}
@@ -1559,6 +1615,13 @@ export default function EhrDashboard() {
         <div className="text-xs text-gray-500 mb-4 bg-gray-100 p-2 rounded inline-block">
           Patient ({scenario.patientId}) · Coverage ({scenario.coverageId}) · NPI {scenario.npi}
         </div>
+        {scenarioId === 'smart-patient' && (
+          <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5 mb-4">
+            Patient from the SMART launch. The coverage, member ID, and ordering
+            NPI above are synthesized for this demo, since the launching
+            EHR&rsquo;s test data has no BCBSIL coverage.
+          </div>
+        )}
         {scenarioId === 'epic-patient' && (
           <div className="text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 mb-4">
             Real Epic FHIR identity. The coverage, member ID, and ordering
