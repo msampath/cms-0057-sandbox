@@ -8,6 +8,23 @@ const nextConfig = {
   // calls in client components go through lib/basePath.js apiUrl().
   basePath: '/cms-0057',
   reactStrictMode: true,
+  // The SMART App Launcher and the CDS Hooks Sandbox open /ehr/launch in an
+  // iframe. Firebase Hosting adds X-Frame-Options: DENY to every path on the
+  // domain, and browsers ignore X-Frame-Options when a CSP frame-ancestors
+  // directive is present, so this list is what decides who may frame pages.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-ancestors 'self' https://launch.smarthealthit.org https://sandbox.cds-hooks.org"
+          }
+        ]
+      }
+    ];
+  },
   webpack: (config) => {
     // Webpack walks up from the project root looking for things to watch.
     // On Windows non-system drives that includes folders the user can't
